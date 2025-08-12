@@ -1,6 +1,7 @@
 """Smoke tests for PDF2HTML CLI."""
 
 import pytest
+
 from src.pdf2html_api.html_merge import merge_pages
 
 
