@@ -1,0 +1,47 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy-production:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Deploy to Hetzner Production
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.HETZNER_PRODUCTION_HOST }}
+        username: ${{ secrets.HETZNER_USERNAME }}
+        key: ${{ secrets.HETZNER_SSH_KEY }}
+        script: |
+          # Navigate to project directory
+          cd /opt/pdf2html-api-production
+          
+          # Pull latest code
+          git pull origin main
+          
+          # Update environment file with secrets
+          cat > .env << EOF
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          ENVIRONMENT=production
+          EOF
+          
+          # Run deployment script
+          chmod +x deployment/deploy.sh
+          ./deployment/deploy.sh production deploy
+          
+    - name: Health check production
+      run: |
+        sleep 30
+        curl -f http://${{ secrets.HETZNER_PRODUCTION_HOST }}:8002/health || exit 1
+        
+    - name: Notify deployment success
+      if: success()
+      run: |
+        echo "Production deployment completed successfully!"
+        # Add notification logic here (Slack, Discord, etc.) 

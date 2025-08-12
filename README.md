@@ -1,20 +1,18 @@
 # PDF2HTML API
 
-Convert PDF pages to HTML using OpenAI Vision API via HTTP endpoints.
-
-This API service downloads PDFs from URLs, converts each page to an image, uses OpenAI's Vision API to extract structured HTML that preserves the original layout and formatting, and returns the complete HTML document.
+Convert PDF pages to HTML using OpenAI Vision API via HTTP.
 
 ## Features
 
-- **HTTP API**: Simple REST endpoints for PDF to HTML conversion
-- **URL-based**: Accepts PDF URLs instead of local files
-- **Layout Preservation**: Maintains original document structure and formatting
-- **Multi-column Support**: Handles complex layouts with grid and column modes
-- **OpenAI Integration**: Uses GPT-4 Vision for accurate text extraction
-- **Background Processing**: Efficient handling with automatic cleanup
-- **Multiple Output Formats**: JSON response or direct HTML
+- Convert PDF files to HTML using OpenAI's Vision API
+- Support for multiple CSS layout modes (grid, columns, single)
+- Configurable DPI and model parameters
+- FastAPI-based REST API with automatic documentation
+- Docker containerization for easy deployment
 
-## Installation
+## Quick Start
+
+### Local Development
 
 1. Clone the repository:
 ```bash
@@ -22,214 +20,215 @@ git clone <repository-url>
 cd pdf2llm2html
 ```
 
-2. Install dependencies:
+2. Create a virtual environment:
 ```bash
-pip install -e .
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
-3. Set up environment variables:
+3. Install dependencies:
+```bash
+pip install -e ".[dev]"
+```
+
+4. Set up environment variables:
 ```bash
 cp env.example .env
-# Edit .env and add your OpenAI API key
+# Edit .env with your OpenAI API key
 ```
 
-## Configuration
-
-Create a `.env` file with the following variables:
-
-```env
-OPENAI_API_KEY=your_openai_api_key_here
-OPENAI_MODEL=gpt-4o-mini  # Optional, defaults to gpt-4o-mini
+5. Run the API:
+```bash
+python run_api.py
 ```
 
-## Usage
+The API will be available at `http://localhost:8000` with documentation at `http://localhost:8000/docs`.
 
-### Starting the API Server
+### Docker
 
 ```bash
-# Using uvicorn directly
-uvicorn src.pdf2html_api.main:app --host 0.0.0.0 --port 8000
+# Build and run with Docker Compose
+docker-compose up -d
 
-# Or using the package entry point
-pdf2html-api
+# Or build manually
+docker build -t pdf2html-api .
+docker run -p 8000:8000 -e OPENAI_API_KEY=your-key pdf2html-api
 ```
 
-The API will be available at `http://localhost:8000`
+## API Usage
 
-### API Endpoints
-
-#### 1. Convert PDF to HTML (JSON Response)
-
-**POST** `/convert`
-
-Converts a PDF from URL to HTML and returns a JSON response with metadata.
-
-**Request Body:**
-```json
-{
-  "pdf_url": "https://example.com/document.pdf",
-  "model": "gpt-4o-mini",
-  "dpi": 200,
-  "max_tokens": 4000,
-  "temperature": 0.0,
-  "css_mode": "grid"
-}
-```
-
-**Response:**
-```json
-{
-  "html": "<!DOCTYPE html>...",
-  "pages_processed": 3,
-  "model_used": "gpt-4o-mini",
-  "css_mode": "grid"
-}
-```
-
-#### 2. Convert PDF to HTML (Direct HTML Response)
-
-**POST** `/convert/html`
-
-Converts a PDF from URL to HTML and returns the HTML directly.
-
-**Request Body:** Same as above
-
-**Response:** Raw HTML content with `Content-Type: text/html`
-
-#### 3. Health Check
-
-**GET** `/health`
-
-Returns service health status.
-
-**Response:**
-```json
-{
-  "status": "healthy",
-  "service": "pdf2html-api"
-}
-```
-
-#### 4. API Information
-
-**GET** `/`
-
-Returns API information and available endpoints.
-
-### Parameters
-
-- **pdf_url** (required): URL of the PDF file to convert
-- **model** (optional): OpenAI model to use (default: "gpt-4o-mini")
-- **dpi** (optional): Image resolution for PDF rendering (default: 200, range: 72-600)
-- **max_tokens** (optional): Maximum tokens for LLM response (default: 4000, range: 100-8000)
-- **temperature** (optional): LLM temperature setting (default: 0.0, range: 0.0-2.0)
-- **css_mode** (optional): CSS layout mode (default: "grid", options: "grid", "columns", "single")
-
-### CSS Modes
-
-- **grid**: Uses CSS Grid for multi-column layouts
-- **columns**: Uses CSS Columns for flowing column layouts
-- **single**: Forces single column layout for all content
-
-## Example Usage
-
-### Using curl
+### Convert PDF to HTML
 
 ```bash
-# Convert PDF to HTML with JSON response
 curl -X POST "http://localhost:8000/convert" \
   -H "Content-Type: application/json" \
   -d '{
     "pdf_url": "https://example.com/document.pdf",
+    "model": "gpt-4o-mini",
+    "dpi": 200,
     "css_mode": "grid"
   }'
-
-# Convert PDF to HTML with direct HTML response
-curl -X POST "http://localhost:8000/convert/html" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "pdf_url": "https://example.com/document.pdf"
-  }' \
-  -o output.html
 ```
 
-### Using Python
+### Health Check
 
-```python
-import httpx
-
-async def convert_pdf():
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            "http://localhost:8000/convert",
-            json={
-                "pdf_url": "https://example.com/document.pdf",
-                "css_mode": "grid"
-            }
-        )
-        
-        if response.status_code == 200:
-            result = response.json()
-            print(f"Converted {result['pages_processed']} pages")
-            print(f"HTML: {result['html'][:200]}...")
-        else:
-            print(f"Error: {response.text}")
+```bash
+curl http://localhost:8000/health
 ```
 
-## API Documentation
+## CI/CD Pipeline
 
-Once the server is running, you can access:
+This project includes a comprehensive CI/CD pipeline with the following features:
 
-- **Interactive API docs**: http://localhost:8000/docs
-- **ReDoc documentation**: http://localhost:8000/redoc
+### GitHub Actions Workflows
 
-## Error Handling
+1. **CI Pipeline** (`.github/workflows/ci.yml`)
+   - Runs on PRs to `main` and `staging` branches
+   - Executes tests, linting, and security checks
+   - Supports multiple Python versions (3.11, 3.12)
+   - Generates test coverage reports
 
-The API returns appropriate HTTP status codes:
+2. **Staging Deployment** (`.github/workflows/deploy-staging.yml`)
+   - Triggers on pushes to `staging` branch
+   - Builds and pushes Docker image to Docker Hub
+   - Deploys to staging environment on Hetzner server
 
-- **200**: Successful conversion
-- **400**: Bad request (invalid URL, parameters, etc.)
-- **500**: Internal server error (conversion failed, API errors, etc.)
+3. **Production Deployment** (`.github/workflows/deploy-production.yml`)
+   - Triggers on pushes to `main` branch
+   - Deploys to production environment on Hetzner server
+   - Includes health checks and notifications
 
-Error responses include detailed error messages:
+### Server Setup
 
-```json
-{
-  "detail": "Failed to download PDF: HTTP 404"
-}
+1. **Initial Server Setup**
+```bash
+# On your Hetzner server
+wget https://raw.githubusercontent.com/your-repo/pdf2llm2html/main/deployment/setup-server.sh
+chmod +x setup-server.sh
+./setup-server.sh
 ```
+
+2. **Configure Environment Variables**
+   - Update `/opt/pdf2html-api-staging/.env`
+   - Update `/opt/pdf2html-api-production/.env`
+   - Configure Traefik with your domain
+
+3. **DNS Configuration**
+   - Point `staging.pdf2html.yourdomain.com` to staging server
+   - Point `api.pdf2html.yourdomain.com` to production server
+
+### Required GitHub Secrets
+
+Configure these secrets in your GitHub repository:
+
+- `OPENAI_API_KEY`: Your OpenAI API key
+- `DOCKER_USERNAME`: Your Docker Hub username
+- `DOCKER_PASSWORD`: Your Docker Hub password/token
+- `HETZNER_STAGING_HOST`: Staging server IP/hostname
+- `HETZNER_PRODUCTION_HOST`: Production server IP/hostname
+- `HETZNER_USERNAME`: SSH username for Hetzner servers
+- `HETZNER_SSH_KEY`: SSH private key for Hetzner servers
+
+### Manual Deployment
+
+Use the deployment script for manual operations:
+
+```bash
+# Deploy to staging
+./deployment/deploy.sh staging deploy
+
+# Deploy to production
+./deployment/deploy.sh production deploy
+
+# Rollback staging
+./deployment/deploy.sh staging rollback
+
+# Check status
+./deployment/deploy.sh staging status
+
+# View logs
+./deployment/deploy.sh staging logs
+```
+
+### Monitoring
+
+The production environment includes monitoring with Prometheus and Grafana:
+
+```bash
+# Start monitoring stack
+cd /opt/monitoring
+docker-compose -f monitoring.yml up -d
+```
+
+Access monitoring at:
+- Grafana: `https://grafana.yourdomain.com` (admin/admin123)
+- Prometheus: `https://monitoring.yourdomain.com`
 
 ## Development
 
 ### Running Tests
 
 ```bash
-pytest tests/
+# Run all tests
+pytest tests/ -v
+
+# Run with coverage
+pytest tests/ -v --cov=src --cov-report=html
+
+# Run specific test file
+pytest tests/test_api.py -v
 ```
 
-### Project Structure
+### Code Quality
 
+```bash
+# Format code
+black src/ tests/
+
+# Sort imports
+isort src/ tests/
+
+# Lint code
+flake8 src/ tests/
+
+# Type checking
+mypy src/
 ```
-src/pdf2html_api/
-├── __init__.py
-├── main.py              # FastAPI application
-├── config.py            # Configuration management
-├── html_merge.py        # HTML document assembly
-├── llm.py              # OpenAI Vision API integration
-├── pdf_to_images.py    # PDF to image conversion
-└── prompts/
-    └── image_to_html.md # LLM prompt template
+
+### Adding Dependencies
+
+Update `pyproject.toml` and install:
+
+```bash
+pip install -e ".[dev]"
 ```
 
-## Dependencies
+## Environment Variables
 
-- **FastAPI**: Web framework
-- **Uvicorn**: ASGI server
-- **PyMuPDF**: PDF processing
-- **OpenAI**: Vision API integration
-- **Pydantic**: Data validation
-- **httpx**: HTTP client for downloading PDFs
-- **python-dotenv**: Environment variable management
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OPENAI_API_KEY` | OpenAI API key | Required |
+| `HOST` | Server host | `0.0.0.0` |
+| `PORT` | Server port | `8000` |
+| `ENVIRONMENT` | Environment name | `development` |
+
+## Architecture
+
+- **FastAPI**: Web framework for the REST API
+- **OpenAI Vision API**: Converts PDF pages to HTML
+- **PyMuPDF**: PDF processing and image rendering
+- **Docker**: Containerization for deployment
+- **Traefik**: Reverse proxy with SSL termination
+- **Prometheus/Grafana**: Monitoring and alerting
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests for new functionality
+5. Ensure all tests pass
+6. Submit a pull request
 
 ## License
 

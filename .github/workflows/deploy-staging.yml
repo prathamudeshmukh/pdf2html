@@ -1,0 +1,41 @@
+name: Deploy to Staging
+
+on:
+  push:
+    branches: [ staging ]
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Deploy to Hetzner Staging
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.HETZNER_STAGING_HOST }}
+        username: ${{ secrets.HETZNER_USERNAME }}
+        key: ${{ secrets.HETZNER_SSH_KEY }}
+        script: |
+          # Navigate to project directory
+          cd /opt/pdf2html-api-staging
+          
+          # Pull latest code
+          git pull origin staging
+          
+          # Update environment file with secrets
+          cat > .env << EOF
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          ENVIRONMENT=staging
+          EOF
+          
+          # Run deployment script
+          chmod +x deployment/deploy.sh
+          ./deployment/deploy.sh staging deploy
+          
+    - name: Health check staging
+      run: |
+        sleep 30
+        curl -f http://${{ secrets.HETZNER_STAGING_HOST }}:8001/health || exit 1 
