@@ -90,3 +90,9 @@ output.html
 output_direct.html
 *.pdf
 !sample*.pdf 
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so

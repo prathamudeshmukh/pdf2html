@@ -1,25 +1,27 @@
 """Merge page HTML fragments into a complete HTML document."""
 
-from typing import List, Literal, Union
+from typing import List, Literal
 
 
-def merge_pages(page_html_list: List[str], css_mode: Literal["grid", "columns", "single"]) -> str:
+def merge_pages(
+    page_html_list: List[str], css_mode: Literal["grid", "columns", "single"]
+) -> str:
     """
     Merge page HTML fragments into a complete HTML document.
-    
+
     Args:
         page_html_list: List of HTML strings for each page
         css_mode: CSS mode for layout styling
-        
+
     Returns:
         Complete HTML document string
     """
     # Generate CSS based on mode
     css = _generate_css(css_mode)
-    
+
     # Combine all page HTML
     pages_html = "\n".join(page_html_list)
-    
+
     # Create complete HTML document
     html_document = f"""<!DOCTYPE html>
 <html lang="en">
@@ -37,23 +39,24 @@ def merge_pages(page_html_list: List[str], css_mode: Literal["grid", "columns", 
     </main>
 </body>
 </html>"""
-    
+
     return html_document
 
 
 def _generate_css(css_mode: Literal["grid", "columns", "single"]) -> str:
     """
     Generate CSS styles based on the selected mode.
-    
+
     Args:
         css_mode: CSS mode for layout styling
-        
+
     Returns:
         CSS string
     """
     base_css = """/* Base typography and layout */
 body {
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+                 Roboto, sans-serif;
     line-height: 1.6;
     color: #333;
     margin: 0;
@@ -182,14 +185,13 @@ a:hover {
         page-break-after: always;
         margin: 0;
     }
-    
     .document {
         width: 100%;
         margin: 0;
         padding: 0;
     }
 }"""
-    
+
     if css_mode == "grid":
         grid_css = """
 /* CSS Grid layout helpers */
@@ -215,7 +217,7 @@ a:hover {
     }
 }"""
         return base_css + grid_css
-    
+
     elif css_mode == "columns":
         columns_css = """
 /* CSS Columns layout helpers */
@@ -250,6 +252,6 @@ a:hover {
     }
 }"""
         return base_css + columns_css
-    
+
     else:  # single mode
-        return base_css 
+        return base_css
