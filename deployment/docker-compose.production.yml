@@ -2,9 +2,13 @@ version: '3.8'
 
 services:
   pdf2html-api:
-    image: ${DOCKER_USERNAME}/pdf2html-api:production
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: pdf2html-api:production
+    container_name: pdf2html-api-production
     ports:
-      - "8000:8000"
+      - "8002:8000"
     environment:
       - HOST=0.0.0.0
       - PORT=8000

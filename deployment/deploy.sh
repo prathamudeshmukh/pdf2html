@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Deployment script for PDF2HTML API
-# Usage: ./deploy.sh [staging|production] [rollback]
+# Deployment script for PDF2HTML API - Server Build Version
+# Usage: ./deploy.sh [staging|production] [deploy|rollback|restart|logs|status|build]
 
 set -e
 
@@ -13,77 +13,65 @@ if [[ ! "$ENVIRONMENT" =~ ^(staging|production)$ ]]; then
     exit 1
 fi
 
-DEPLOY_DIR="/opt/pdf2html-api-$ENVIRONMENT"
-SERVICE_NAME="pdf2html-$ENVIRONMENT"
-
 # Set port based on environment
 if [ "$ENVIRONMENT" = "staging" ]; then
     HEALTH_PORT="8001"
+    COMPOSE_FILE="docker-compose.staging.yml"
 else
     HEALTH_PORT="8002"
+    COMPOSE_FILE="docker-compose.production.yml"
 fi
 
 echo "Starting $ACTION for $ENVIRONMENT environment..."
 
-# Create deployment directory if it doesn't exist
-if [ ! -d "$DEPLOY_DIR" ]; then
-    echo "Creating deployment directory: $DEPLOY_DIR"
-    sudo mkdir -p "$DEPLOY_DIR"
-    sudo mkdir -p "$DEPLOY_DIR/logs"
-    if [ "$ENVIRONMENT" = "production" ]; then
-        sudo mkdir -p "$DEPLOY_DIR/backups"
-    fi
-    sudo chown -R $USER:$USER "$DEPLOY_DIR"
+# Ensure we're in the project root directory
+if [ ! -f "Dockerfile" ]; then
+    echo "Error: Dockerfile not found. Please run this script from the project root directory."
+    exit 1
 fi
 
-cd "$DEPLOY_DIR"
+# Create logs directory if it doesn't exist
+mkdir -p logs
+if [ "$ENVIRONMENT" = "production" ]; then
+    mkdir -p backups
+fi
 
 # Create environment file if it doesn't exist
 if [ ! -f ".env" ]; then
     echo "Creating .env file for $ENVIRONMENT..."
     cat > .env << EOF
-DOCKER_USERNAME=\${DOCKER_USERNAME:-your-docker-username}
-OPENAI_API_KEY=\${OPENAI_API_KEY:-your-openai-api-key}
+OPENAI_API_KEY=your-openai-api-key-here
 ENVIRONMENT=$ENVIRONMENT
 EOF
-    echo "⚠️  Please update the .env file with your actual credentials before deploying"
-    echo "   Edit: $DEPLOY_DIR/.env"
+    echo "⚠️  Please update the .env file with your actual OpenAI API key before deploying"
+    echo "   Edit: .env"
     exit 1
 fi
 
-# Copy and configure docker-compose file if it doesn't exist
-if [ ! -f "docker-compose.yml" ]; then
-    echo "Setting up docker-compose.yml for $ENVIRONMENT..."
+# Function to build Docker image
+build_image() {
+    local env=$1
+    echo "Building Docker image for $env environment..."
     
-    # Find the project directory (assuming this script is in deployment/)
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+    # Build the image
+    docker build -t pdf2html-api:$env .
     
-    # Copy the appropriate docker-compose file
-    if [ "$ENVIRONMENT" = "staging" ]; then
-        cp "$SCRIPT_DIR/docker-compose.staging.yml" docker-compose.yml
-        # Modify for nginx compatibility
-        sed -i 's/- "8000:8000"/- "8001:8000"/' docker-compose.yml
-        sed -i 's/container_name: pdf2html-api/container_name: pdf2html-api-staging/' docker-compose.yml
-    else
-        cp "$SCRIPT_DIR/docker-compose.production.yml" docker-compose.yml
-        # Modify for nginx compatibility
-        sed -i 's/- "8000:8000"/- "8002:8000"/' docker-compose.yml
-        sed -i 's/container_name: pdf2html-api/container_name: pdf2html-api-production/' docker-compose.yml
-    fi
+    # Tag with timestamp for versioning
+    docker tag pdf2html-api:$env pdf2html-api:$env-$(date +%Y%m%d-%H%M%S)
     
-fi
+    echo "✅ Image built successfully: pdf2html-api:$env"
+}
 
 case $ACTION in
     "deploy")
-        echo "Pulling latest image..."
-        docker-compose pull
+        # Build the image locally
+        build_image $ENVIRONMENT
         
         echo "Stopping current containers..."
-        docker-compose down
+        docker-compose -f deployment/$COMPOSE_FILE down
         
         echo "Starting new containers..."
-        docker-compose up -d
+        docker-compose -f deployment/$COMPOSE_FILE up -d
         
         echo "Waiting for health check..."
         sleep 30
@@ -92,17 +80,20 @@ case $ACTION in
         if curl -f http://localhost:$HEALTH_PORT/health > /dev/null 2>&1; then
             echo "✅ Deployment successful!"
             
-            # Clean up old images
+            # Clean up old images (keep last 3 versions)
             echo "Cleaning up old images..."
             docker image prune -f
             
+            # Keep only the last 3 images for this environment
+            docker images pdf2html-api:$ENVIRONMENT --format "table {{.Repository}}:{{.Tag}}\t{{.CreatedAt}}" | tail -n +2 | sort -k2 -r | tail -n +4 | awk '{print $1}' | xargs -r docker rmi || true
+            
             # Create backup
             echo "Creating backup..."
-            docker-compose exec -T pdf2html-api tar czf /app/backups/backup-$(date +%Y%m%d-%H%M%S).tar.gz /app/logs 2>/dev/null || true
+            docker-compose -f deployment/$COMPOSE_FILE exec -T pdf2html-api tar czf /app/backups/backup-$(date +%Y%m%d-%H%M%S).tar.gz /app/logs 2>/dev/null || true
         else
             echo "❌ Health check failed! Rolling back..."
-            docker-compose down
-            docker-compose up -d
+            docker-compose -f deployment/$COMPOSE_FILE down
+            docker-compose -f deployment/$COMPOSE_FILE up -d
             exit 1
         fi
         ;;
@@ -111,35 +102,49 @@ case $ACTION in
         echo "Rolling back to previous version..."
         
         # Stop current containers
-        docker-compose down
+        docker-compose -f deployment/$COMPOSE_FILE down
         
-        # Pull the previous image tag
-        if [ "$ENVIRONMENT" = "production" ]; then
-            docker pull ${DOCKER_USERNAME}/pdf2html-api:latest
-        else
-            docker pull ${DOCKER_USERNAME}/pdf2html-api:staging
+        # Find the previous image tag
+        PREVIOUS_IMAGE=$(docker images pdf2html-api:$ENVIRONMENT --format "table {{.Repository}}:{{.Tag}}" | tail -n +2 | head -n 1)
+        
+        if [ -z "$PREVIOUS_IMAGE" ]; then
+            echo "❌ No previous image found for rollback!"
+            exit 1
         fi
         
-        # Start containers
-        docker-compose up -d
+        echo "Rolling back to: $PREVIOUS_IMAGE"
         
-        echo "Rollback completed!"
+        # Update docker-compose to use the previous image
+        sed -i "s|image: pdf2html-api:$ENVIRONMENT|image: $PREVIOUS_IMAGE|" deployment/$COMPOSE_FILE
+        
+        # Start containers
+        docker-compose -f deployment/$COMPOSE_FILE up -d
+        
+        echo "✅ Rollback completed!"
+        ;;
+        
+    "build")
+        # Just build the image without deploying
+        build_image $ENVIRONMENT
         ;;
         
     "restart")
         echo "Restarting services..."
-        docker-compose restart
+        docker-compose -f deployment/$COMPOSE_FILE restart
         echo "Restart completed!"
         ;;
         
     "logs")
         echo "Showing logs..."
-        docker-compose logs -f
+        docker-compose -f deployment/$COMPOSE_FILE logs -f
         ;;
         
     "status")
         echo "Service status:"
-        docker-compose ps
+        docker-compose -f deployment/$COMPOSE_FILE ps
+        echo ""
+        echo "Available images:"
+        docker images pdf2html-api:$ENVIRONMENT
         echo ""
         echo "Health check:"
         curl -s http://localhost:$HEALTH_PORT/health | jq . || echo "Health check failed"
@@ -147,7 +152,7 @@ case $ACTION in
         
     *)
         echo "Unknown action: $ACTION"
-        echo "Available actions: deploy, rollback, restart, logs, status"
+        echo "Available actions: deploy, rollback, build, restart, logs, status"
         exit 1
         ;;
 esac 
