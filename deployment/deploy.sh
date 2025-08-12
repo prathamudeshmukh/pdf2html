@@ -25,7 +25,54 @@ fi
 
 echo "Starting $ACTION for $ENVIRONMENT environment..."
 
+# Create deployment directory if it doesn't exist
+if [ ! -d "$DEPLOY_DIR" ]; then
+    echo "Creating deployment directory: $DEPLOY_DIR"
+    sudo mkdir -p "$DEPLOY_DIR"
+    sudo mkdir -p "$DEPLOY_DIR/logs"
+    if [ "$ENVIRONMENT" = "production" ]; then
+        sudo mkdir -p "$DEPLOY_DIR/backups"
+    fi
+    sudo chown -R $USER:$USER "$DEPLOY_DIR"
+fi
+
 cd "$DEPLOY_DIR"
+
+# Create environment file if it doesn't exist
+if [ ! -f ".env" ]; then
+    echo "Creating .env file for $ENVIRONMENT..."
+    cat > .env << EOF
+DOCKER_USERNAME=\${DOCKER_USERNAME:-your-docker-username}
+OPENAI_API_KEY=\${OPENAI_API_KEY:-your-openai-api-key}
+ENVIRONMENT=$ENVIRONMENT
+EOF
+    echo "⚠️  Please update the .env file with your actual credentials before deploying"
+    echo "   Edit: $DEPLOY_DIR/.env"
+    exit 1
+fi
+
+# Copy and configure docker-compose file if it doesn't exist
+if [ ! -f "docker-compose.yml" ]; then
+    echo "Setting up docker-compose.yml for $ENVIRONMENT..."
+    
+    # Find the project directory (assuming this script is in deployment/)
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+    
+    # Copy the appropriate docker-compose file
+    if [ "$ENVIRONMENT" = "staging" ]; then
+        cp "$SCRIPT_DIR/docker-compose.staging.yml" docker-compose.yml
+        # Modify for nginx compatibility
+        sed -i 's/- "8000:8000"/- "8001:8000"/' docker-compose.yml
+        sed -i 's/container_name: pdf2html-api/container_name: pdf2html-api-staging/' docker-compose.yml
+    else
+        cp "$SCRIPT_DIR/docker-compose.production.yml" docker-compose.yml
+        # Modify for nginx compatibility
+        sed -i 's/- "8000:8000"/- "8002:8000"/' docker-compose.yml
+        sed -i 's/container_name: pdf2html-api/container_name: pdf2html-api-production/' docker-compose.yml
+    fi
+    
+fi
 
 case $ACTION in
     "deploy")
