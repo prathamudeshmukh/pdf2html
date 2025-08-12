@@ -2,40 +2,40 @@
 
 import pytest
 
-from src.pdf2html_api.html_merge import merge_pages
+from pdf2html_api.html_merge import merge_pages
 
 
 def test_import_main():
     """Test that the main module can be imported."""
-    from src.pdf2html_api import main
+    from pdf2html_api import main
 
     assert main.app is not None
 
 
 def test_import_config():
     """Test that the config module can be imported."""
-    from src.pdf2html_api import config
+    from pdf2html_api import config
 
     assert config.get_settings is not None
 
 
 def test_import_pdf_to_images():
     """Test that the PDF to images module can be imported."""
-    from src.pdf2html_api import pdf_to_images
+    from pdf2html_api import pdf_to_images
 
     assert pdf_to_images.render_pdf_to_images is not None
 
 
 def test_import_llm():
     """Test that the LLM module can be imported."""
-    from src.pdf2html_api import llm
+    from pdf2html_api import llm
 
     assert llm.HTMLGenerator is not None
 
 
 def test_import_html_merge():
     """Test that the HTML merge module can be imported."""
-    from src.pdf2html_api import html_merge
+    from pdf2html_api import html_merge
 
     assert html_merge.merge_pages is not None
 

@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
-from src.pdf2html_api.main import app
+from pdf2html_api.main import app
 
 client = TestClient(app)
 
@@ -49,11 +49,11 @@ def test_convert_endpoint_invalid_css_mode():
     assert response.status_code == 500  # Will fail during processing, not validation
 
 
-@patch("src.pdf2html_api.main.get_settings")
-@patch("src.pdf2html_api.main._download_pdf_from_url")
-@patch("src.pdf2html_api.main.render_pdf_to_images")
-@patch("src.pdf2html_api.main.HTMLGenerator")
-@patch("src.pdf2html_api.main.merge_pages")
+@patch("pdf2html_api.main.get_settings")
+@patch("pdf2html_api.main._download_pdf_from_url")
+@patch("pdf2html_api.main.render_pdf_to_images")
+@patch("pdf2html_api.main.HTMLGenerator")
+@patch("pdf2html_api.main.merge_pages")
 def test_convert_endpoint_success(
     mock_merge_pages,
     mock_html_generator_class,
@@ -102,11 +102,11 @@ def test_convert_endpoint_success(
     assert data["css_mode"] == "grid"
 
 
-@patch("src.pdf2html_api.main.get_settings")
-@patch("src.pdf2html_api.main._download_pdf_from_url")
-@patch("src.pdf2html_api.main.render_pdf_to_images")
-@patch("src.pdf2html_api.main.HTMLGenerator")
-@patch("src.pdf2html_api.main.merge_pages")
+@patch("pdf2html_api.main.get_settings")
+@patch("pdf2html_api.main._download_pdf_from_url")
+@patch("pdf2html_api.main.render_pdf_to_images")
+@patch("pdf2html_api.main.HTMLGenerator")
+@patch("pdf2html_api.main.merge_pages")
 def test_convert_html_endpoint_success(
     mock_merge_pages,
     mock_html_generator_class,
