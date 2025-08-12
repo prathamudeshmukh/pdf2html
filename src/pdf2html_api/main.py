@@ -87,18 +87,21 @@ async def convert_pdf_to_html(request: PDFRequest, background_tasks: BackgroundT
         settings = get_settings()
 
         # Override settings with request parameters
-        settings.model = request.model
-        settings.dpi = request.dpi
+        if request.model is not None:
+            settings.model = request.model
+        if request.dpi is not None:
+            settings.dpi = request.dpi
         settings.max_tokens = request.max_tokens or 4000
         settings.temperature = request.temperature or 0.0
 
         # Validate CSS mode
-        if request.css_mode not in ["grid", "columns", "single"]:
+        css_mode = request.css_mode or "grid"
+        if css_mode not in ["grid", "columns", "single"]:
             raise HTTPException(
                 status_code=400,
-                detail=f"CSS mode must be valid got '{request.css_mode}'",
+                detail=f"CSS mode must be valid got '{css_mode}'",
             )
-        settings.css_mode = request.css_mode or "grid"
+        settings.css_mode = css_mode  # type: ignore[assignment]
 
         # Step 1: Download PDF from URL
         pdf_path = await _download_pdf_from_url(str(request.pdf_url))
@@ -162,18 +165,21 @@ async def convert_pdf_to_html_direct(
         settings = get_settings()
 
         # Override settings with request parameters
-        settings.model = request.model or "gpt-4o-mini"
-        settings.dpi = request.dpi or 200
+        if request.model is not None:
+            settings.model = request.model
+        if request.dpi is not None:
+            settings.dpi = request.dpi
         settings.max_tokens = request.max_tokens or 4000
         settings.temperature = request.temperature or 0.0
 
         # Validate CSS mode
-        if request.css_mode not in ["grid", "columns", "single"]:
+        css_mode = request.css_mode or "grid"
+        if css_mode not in ["grid", "columns", "single"]:
             raise HTTPException(
                 status_code=400,
-                detail=f"CSS mode must be valid, got '{request.css_mode}'",
+                detail=f"CSS mode must be valid, got '{css_mode}'",
             )
-        settings.css_mode = request.css_mode or "grid"
+        settings.css_mode = css_mode  # type: ignore[assignment]
 
         # Step 1: Download PDF from URL
         pdf_path = await _download_pdf_from_url(str(request.pdf_url))

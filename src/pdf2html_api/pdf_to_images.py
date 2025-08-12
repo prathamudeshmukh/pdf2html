@@ -2,7 +2,7 @@
 
 import tempfile
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import fitz  # PyMuPDF
 
@@ -71,7 +71,7 @@ def render_pdf_to_images(
 
 
 def cleanup_temp_images(
-    image_paths: List[Path], temp_dir: tempfile.TemporaryDirectory = None
+    image_paths: List[Path], temp_dir: Optional[tempfile.TemporaryDirectory] = None
 ) -> None:
     """
     Clean up temporary image files and directory.

@@ -156,7 +156,10 @@ class HTMLGenerator:
                 temperature=self.temperature,
             )
 
-            return response.choices[0].message.content
+            content = response.choices[0].message.content
+            if content is None:
+                raise Exception("OpenAI API returned empty response")
+            return content
 
         except Exception as e:
             # Log the error for debugging
