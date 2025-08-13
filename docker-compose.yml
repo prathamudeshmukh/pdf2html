@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  pdf2html-api-prod:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pdf2html-api-prod
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - BEARER_TOKEN=${BEARER_TOKEN_PROD}
+      - SENTRY_DSN=${SENTRY_DSN}
+      - PDFTRON_LICENSE_KEY=${PDFTRON_LICENSE_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    restart: unless-stopped
+    networks:
+      - pdf2html-api-network
+    volumes:
+      - /home/root/lib:/home/root/lib
+
+  pdf2html-api-staging:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pdf2html-api-staging
+    ports:
+      - "8001:8000"
+    environment:
+      - ENVIRONMENT=staging
+      - BEARER_TOKEN=${BEARER_TOKEN_STAGING}
+      - SENTRY_DSN=${SENTRY_DSN}
+      - PDFTRON_LICENSE_KEY=${PDFTRON_LICENSE_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    restart: unless-stopped
+    networks:
+      - pdf2html-api-network
+    volumes:
+      - /home/root/lib:/home/root/lib
+
+networks:
+  pdf2html-api-network:
+    driver: bridge 

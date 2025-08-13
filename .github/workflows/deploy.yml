@@ -1,0 +1,70 @@
+name: Deploy to Hetzner
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.HETZNER_SSH_KEY }}
+
+      - name: Add Hetzner host to known_hosts
+        run: |
+          ssh-keyscan -H ${{ secrets.HETZNER_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Set environment variables
+        id: env
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ] || [ "${{ github.event.inputs.environment }}" = "production" ]; then
+            echo "environment=production" >> $GITHUB_OUTPUT
+            echo "container_name=pdf2html-api-prod" >> $GITHUB_OUTPUT
+            echo "port=8000" >> $GITHUB_OUTPUT
+            echo "bearer_token=${{ secrets.BEARER_TOKEN_PROD }}" >> $GITHUB_OUTPUT
+          else
+            echo "environment=staging" >> $GITHUB_OUTPUT
+            echo "container_name=pdf2html-api-staging" >> $GITHUB_OUTPUT
+            echo "port=8001" >> $GITHUB_OUTPUT
+            echo "bearer_token=${{ secrets.BEARER_TOKEN_STAGING }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Copy files to server
+        run: |
+          rsync -avz --exclude 'node_modules' --exclude 'dist' --exclude '.git' --exclude '__pycache__' --exclude 'venv' --exclude '.pytest_cache' --exclude '.mypy_cache' ./ ${{ secrets.HETZNER_USER }}@${{ secrets.HETZNER_HOST }}:/home/${{ secrets.HETZNER_USER }}/pdf2html-api-${{ steps.env.outputs.environment }}
+
+      - name: Copy deploy script to server
+        run: |
+          scp scripts/deploy.sh ${{ secrets.HETZNER_USER }}@${{ secrets.HETZNER_HOST }}:/home/${{ secrets.HETZNER_USER }}/deploy.sh
+
+      - name: Deploy Docker container
+        run: |
+          ssh ${{ secrets.HETZNER_USER }}@${{ secrets.HETZNER_HOST }} '
+            chmod +x /home/${{ secrets.HETZNER_USER }}/deploy.sh
+            HETZNER_USER=${{ secrets.HETZNER_USER }} \
+            HETZNER_HOST=${{ secrets.HETZNER_HOST }} \
+            BEARER_TOKEN_STAGING="${{ secrets.BEARER_TOKEN_STAGING }}" \
+            BEARER_TOKEN_PROD="${{ secrets.BEARER_TOKEN_PROD }}" \
+            SENTRY_DSN="${{ secrets.SENTRY_DSN }}" \
+            PDFTRON_LICENSE_KEY="${{ secrets.PDFTRON_LICENSE_KEY }}" \
+            OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
+            /home/${{ secrets.HETZNER_USER }}/deploy.sh ${{ steps.env.outputs.environment }}
+          ' 
