@@ -2,7 +2,9 @@ version: '3.8'
 
 services:
   pdf2html-api-prod:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: pdf2html-api-prod
     ports:
       - "8000:8000"
@@ -19,7 +21,9 @@ services:
       - /home/root/lib:/home/root/lib
 
   pdf2html-api-staging:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: pdf2html-api-staging
     ports:
       - "8001:8000"

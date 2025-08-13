@@ -8,11 +8,11 @@ RUN apt-get update && apt-get install -y \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements file
-COPY pyproject.toml .
+# Copy pyproject.toml and requirements.txt first for better caching
+COPY pyproject.toml requirements.txt ./
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -e .
+# Install Python dependencies using requirements.txt (more reliable)
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy source code
 COPY . .
