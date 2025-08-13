@@ -65,5 +65,6 @@ jobs:
             BEARER_TOKEN_PROD="${{ secrets.BEARER_TOKEN_PROD }}" \
             SENTRY_DSN="${{ secrets.SENTRY_DSN }}" \
             PDFTRON_LICENSE_KEY="${{ secrets.PDFTRON_LICENSE_KEY }}" \
+            OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
             /home/${{ secrets.HETZNER_USER }}/deploy.sh ${{ steps.env.outputs.environment }}
           ' 

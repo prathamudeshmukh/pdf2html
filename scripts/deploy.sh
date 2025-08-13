@@ -42,6 +42,14 @@ fi
 
 set -e
 cd $PROJECT_DIR
+
+# Export environment variables for docker-compose
+export BEARER_TOKEN_STAGING
+export BEARER_TOKEN_PROD
+export SENTRY_DSN
+export PDFTRON_LICENSE_KEY
+export OPENAI_API_KEY
+
 docker compose pull $SERVICE_NAME || true
 docker compose up -d --build $SERVICE_NAME
 sleep 5
