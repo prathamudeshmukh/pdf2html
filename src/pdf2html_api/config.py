@@ -26,6 +26,9 @@ class Settings(BaseModel):
     # Output Configuration
     css_mode: Literal["grid", "columns", "single"] = Field(default="grid", description="CSS layout mode")
     
+    # Performance Configuration
+    max_parallel_workers: int = Field(default=3, description="Maximum number of parallel workers for page processing")
+    
     def __init__(self, **data):
         """Initialize settings with environment variable support."""
         # Check for API key in environment if not provided
@@ -66,6 +69,13 @@ class Settings(BaseModel):
         """Validate temperature is within bounds."""
         if v < 0.0 or v > 2.0:
             raise ValueError("temperature must be between 0.0 and 2.0")
+        return v
+    
+    @validator("max_parallel_workers")
+    def validate_max_parallel_workers(cls, v):
+        """Validate max parallel workers is within reasonable bounds."""
+        if v < 1 or v > 10:
+            raise ValueError("max_parallel_workers must be between 1 and 10")
         return v
 
 

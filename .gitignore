@@ -89,4 +89,6 @@ cython_debug/
 output.html
 output_direct.html
 *.pdf
-!sample*.pdf 
+!sample*.pdf
+src/pdf2html_api/__pycache__/
+*.log
