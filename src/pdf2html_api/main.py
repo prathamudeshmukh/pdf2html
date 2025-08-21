@@ -305,7 +305,7 @@ async def _download_pdf_from_url(url: str) -> Path:
     logger.info(f"Downloading PDF from: {url}")
     
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             logger.info("Making HTTP request...")
             response = await client.get(url)
             response.raise_for_status()

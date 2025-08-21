@@ -55,7 +55,7 @@ async def test_parallel_processing():
         start_time = time.time()
         
         try:
-            async with httpx.AsyncClient(timeout=300.0) as client:
+            async with httpx.AsyncClient(timeout=120.0) as client:
                 response = await client.post(
                     f"{API_URL}/convert",
                     json={
@@ -193,7 +193,7 @@ async def test_single_vs_multi_page():
         start_time = time.time()
         
         try:
-            async with httpx.AsyncClient(timeout=300.0) as client:
+            async with httpx.AsyncClient(timeout=120.0) as client:
                 response = await client.post(
                     f"{API_URL}/convert",
                     json={

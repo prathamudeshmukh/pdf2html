@@ -75,6 +75,7 @@ Converts a PDF from URL to HTML and returns a JSON response with metadata.
   "css_mode": "grid"
 }
 ```
+```
 
 **Response:**
 ```json
