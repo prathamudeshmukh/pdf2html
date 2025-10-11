@@ -30,7 +30,7 @@ async def convert_pdf_example():
     print(f"API endpoint: {api_url}/convert")
     
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             # Convert PDF to HTML with JSON response
             print("\n1. Converting PDF to HTML (JSON response)...")
             response = await client.post(
