@@ -25,6 +25,7 @@ HTML STRUCTURE RULES:
 - Return ONLY the inner HTML for a single page wrapped in: <section class="page"> ... </section>
 - Do NOT include <html>, <head>, or <body>.
 - Use semantic tags: h1–h6, p, ul/ol/li, table/thead/tbody/tr/th/td, figure/figcaption, header/footer, section/article, div, span
+- **IMPORTANT**: Always properly close self-closing tags with `/>` (e.g., `<br/>`, `<img/>`, `<hr/>`, `<meta/>`, `<input/>`)
 - For text blocks, use <p> for paragraphs and <span> for inline elements
 - For tables, use proper <table> markup with thead/tbody/tr/th/td
 - For lists, use <ul>/<ol> with <li> elements
@@ -44,7 +45,7 @@ STYLING GUIDELINES:
 - Use minimal inline styles only for essential formatting (bold, italic, text-align)
 - Avoid absolute positioning or complex CSS
 - Preserve heading hierarchy based on visual size and weight
-- Include images as <img alt="description"> with placeholder src if needed
+- Include images as <img src="..." alt="description"/> (always close with />)
 - For illegible text, use: <p class="ocr-uncertain">[illegible]</p>
 
 ACCURACY REQUIREMENTS:
