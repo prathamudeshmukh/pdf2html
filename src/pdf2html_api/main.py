@@ -16,6 +16,7 @@ from .html_merge import merge_pages
 from .llm import HTMLGenerator
 from .pdf_to_images import render_pdf_to_images, cleanup_temp_images
 from .variableExtractor.html_variables import HTMLVariableExtractor
+from src.pdf2html_api.sample_json_generator import SampleJSONGenerator
 
 # Configure logging
 logging.basicConfig(
@@ -56,6 +57,7 @@ class PDFResponse(BaseModel):
     pages_processed: int
     model_used: str
     css_mode: str
+    sample_json: Optional[dict[str, str]] = None
 
 
 @app.get("/")
@@ -193,6 +195,7 @@ async def convert_pdf_to_html(request: PDFRequest, background_tasks: BackgroundT
         logger.info(f"[{request_id}] Step 5: Merging pages into final HTML...")
         final_html = merge_pages(page_html_list, settings.css_mode)
         html_with_variables = None
+        sample_json = None
 
         # ✅ OPTIONAL VARIABLE EXTRACTION
         if request.extract_variables:
@@ -214,6 +217,22 @@ async def convert_pdf_to_html(request: PDFRequest, background_tasks: BackgroundT
             except Exception as e:
                 logger.error(f"[{request_id}] Variable extraction failed: {e}")
                 # IMPORTANT: do not fail PDF conversion
+            
+        # Only generate sample JSON if extraction succeeded
+        if html_with_variables:
+            sample_json_generator = SampleJSONGenerator(
+                api_key=settings.openai_api_key,
+                model=settings.model,
+                temperature=0,
+                max_tokens=1000
+        )
+
+            try:
+                sample_json = sample_json_generator.generate(html_with_variables)
+            except Exception as e:
+                logger.error(f"[{request_id}] Sample JSON generation failed: {e}")
+                sample_json = {}
+
 
         merge_time = time.time() - merge_start
         logger.info(f"[{request_id}] HTML merged in {merge_time:.3f}s, final length: {len(final_html)} chars")
@@ -233,7 +252,8 @@ async def convert_pdf_to_html(request: PDFRequest, background_tasks: BackgroundT
             html=html_with_variables if request.extract_variables and html_with_variables else final_html,
             pages_processed=len(page_html_list),
             model_used=settings.model,
-            css_mode=settings.css_mode
+            css_mode=settings.css_mode,
+            sample_json=sample_json if request.extract_variables else None
         )
         
     except Exception as e:
