@@ -15,6 +15,8 @@ from .config import get_settings
 from .html_merge import merge_pages
 from .llm import HTMLGenerator
 from .pdf_to_images import render_pdf_to_images, cleanup_temp_images
+from pdf2html_api.sample_json_extractor import SampleJSONExtractor
+from pdf2html_api.sample_json_to_html import apply_sample_json_to_html
 
 # Configure logging
 logging.basicConfig(
@@ -46,6 +48,7 @@ class PDFRequest(BaseModel):
     temperature: Optional[float] = 0.0
     css_mode: Optional[str] = "grid"
     max_parallel_workers: Optional[int] = 3
+    extract_variables: Optional[bool] = False
 
 
 class PDFResponse(BaseModel):
@@ -54,6 +57,7 @@ class PDFResponse(BaseModel):
     pages_processed: int
     model_used: str
     css_mode: str
+    sample_json: Optional[dict[str, str]] = None
 
 
 @app.get("/")
@@ -190,6 +194,32 @@ async def convert_pdf_to_html(request: PDFRequest, background_tasks: BackgroundT
         merge_start = time.time()
         logger.info(f"[{request_id}] Step 5: Merging pages into final HTML...")
         final_html = merge_pages(page_html_list, settings.css_mode)
+        html_with_variables = None
+        sample_json = None
+
+        # ✅ OPTIONAL VARIABLE EXTRACTION
+        if request.extract_variables:
+            logger.info(f"[{request_id}] Extracting template variables from HTML")
+
+            extractor = SampleJSONExtractor(
+                api_key=settings.openai_api_key,
+                model=settings.model,
+                temperature=0.0,
+                max_tokens=2000,
+            )
+
+            try:
+                sample_json = extractor.extract(final_html)
+                html_with_variables = apply_sample_json_to_html(final_html, sample_json)
+
+                logger.info(
+                    f"[{request_id}] Variable detection completed "
+                    f"({len(sample_json)} variables)"
+                )
+            except Exception as e:
+                logger.error(f"[{request_id}] Variable extraction failed: {e}")
+                # IMPORTANT: do not fail PDF conversion
+
         merge_time = time.time() - merge_start
         logger.info(f"[{request_id}] HTML merged in {merge_time:.3f}s, final length: {len(final_html)} chars")
         
@@ -205,10 +235,11 @@ async def convert_pdf_to_html(request: PDFRequest, background_tasks: BackgroundT
         logger.info(f"[{request_id}]   - Merge: {merge_time:.3f}s ({merge_time/total_time*100:.1f}%)")
         
         return PDFResponse(
-            html=final_html,
+            html=html_with_variables if request.extract_variables and html_with_variables else final_html,
             pages_processed=len(page_html_list),
             model_used=settings.model,
-            css_mode=settings.css_mode
+            css_mode=settings.css_mode,
+            sample_json=sample_json if request.extract_variables else None
         )
         
     except Exception as e:
