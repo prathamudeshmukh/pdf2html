@@ -17,6 +17,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy source code
 COPY . .
 
+# Install the package itself so pdf2html_api is importable
+RUN pip install --no-cache-dir .
+
 # Expose port
 EXPOSE 8000
 
