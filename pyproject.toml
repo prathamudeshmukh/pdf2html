@@ -53,4 +53,7 @@ Issues = "https://github.com/example/pdf2html-api/issues"
 where = ["src"]
 
 [tool.setuptools.package-dir]
-"" = "src" 
+"" = "src"
+
+[tool.setuptools.package-data]
+"pdf2html_api" = ["prompts/*.md"] 
