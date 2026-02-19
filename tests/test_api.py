@@ -1,6 +1,8 @@
 """Tests for PDF2HTML API endpoints."""
 
+import tempfile
 import pytest
+from pathlib import Path
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 
@@ -78,20 +80,23 @@ def test_convert_endpoint_success(
     mock_settings.css_mode = "grid"
     mock_get_settings.return_value = mock_settings
     
-    # Mock PDF download
-    mock_download_pdf.return_value = "/tmp/test.pdf"
-    
+    # Mock PDF download – must be a real Path so pdf_path.stat() doesn't raise
+    tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+    tmp.write(b"%PDF-1.4 stub")
+    tmp.close()
+    mock_download_pdf.return_value = Path(tmp.name)
+
     # Mock PDF to images
     mock_render_pdf.return_value = (["/tmp/page1.png"], MagicMock())
-    
+
     # Mock HTML generator
     mock_html_generator = MagicMock()
     mock_html_generator.image_page_to_html.return_value = '<section class="page"><p>Test content</p></section>'
     mock_html_generator_class.return_value = mock_html_generator
-    
+
     # Mock HTML merge
     mock_merge_pages.return_value = '<!DOCTYPE html><html><body><p>Test content</p></body></html>'
-    
+
     response = client.post(
         "/convert",
         json={
@@ -99,7 +104,7 @@ def test_convert_endpoint_success(
             "css_mode": "grid"
         }
     )
-    
+
     assert response.status_code == 200
     data = response.json()
     assert "html" in data

@@ -90,5 +90,5 @@ output.html
 output_direct.html
 *.pdf
 !sample*.pdf
-src/pdf2html_api/__pycache__/
+**/__pycache__/
 *.log

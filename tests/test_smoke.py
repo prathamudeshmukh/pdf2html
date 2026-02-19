@@ -3,38 +3,7 @@
 import pytest
 from pathlib import Path
 
-from pdf2html_cli.html_merge import merge_pages
-
-
-def test_import_cli():
-    """Test that the CLI module can be imported."""
-    from pdf2html_cli import cli
-    assert cli.app is not None
-
-
-def test_import_config():
-    """Test that the config module can be imported."""
-    from pdf2html_cli import config
-    assert config.get_settings is not None
-
-
-def test_import_pdf_to_images():
-    """Test that the PDF to images module can be imported."""
-    from pdf2html_cli import pdf_to_images
-    assert pdf_to_images.render_pdf_to_images is not None
-
-
-def test_import_llm():
-    """Test that the LLM module can be imported."""
-    from pdf2html_cli import llm
-    assert llm.HTMLGenerator is not None
-
-
-def test_import_html_merge():
-    """Test that the HTML merge module can be imported."""
-    from pdf2html_cli import html_merge
-    assert html_merge.merge_pages is not None
-
+from pdf2html_api.html_merge import merge_pages
 
 def test_merge_pages_grid_mode():
     """Test HTML merge functionality with grid mode."""
