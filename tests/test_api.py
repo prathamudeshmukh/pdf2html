@@ -4,15 +4,37 @@ import tempfile
 import pytest
 from pathlib import Path
 from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.pdf2html_api.main import app
+from src.pdf2html_api.services.conversion_pipeline import (
+    ConversionArtifacts,
+    ConversionResult,
+)
 
 client = TestClient(app)
 
+_MERGED_HTML = "<!DOCTYPE html><html><body><p>Test content</p></body></html>"
+
+
+def _make_result(css_mode: str = "grid", pages: int = 1) -> ConversionResult:
+    tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+    tmp.write(b"%PDF stub")
+    tmp.close()
+    return ConversionResult(
+        html=_MERGED_HTML,
+        pages_processed=pages,
+        model_used="gpt-4o-mini",
+        css_mode=css_mode,
+        artifacts=ConversionArtifacts(
+            pdf_path=Path(tmp.name),
+            image_paths=[],
+            temp_dir=MagicMock(),
+        ),
+    )
+
 
 def test_root_endpoint():
-    """Test the root endpoint returns API information."""
     response = client.get("/")
     assert response.status_code == 200
     data = response.json()
@@ -22,7 +44,6 @@ def test_root_endpoint():
 
 
 def test_health_endpoint():
-    """Test the health check endpoint."""
     response = client.get("/health")
     assert response.status_code == 200
     data = response.json()
@@ -31,80 +52,44 @@ def test_health_endpoint():
 
 
 def test_convert_endpoint_invalid_url():
-    """Test convert endpoint with invalid URL."""
-    response = client.post(
-        "/convert",
-        json={"pdf_url": "not-a-valid-url"}
-    )
-    assert response.status_code == 422  # Validation error
+    response = client.post("/convert", json={"pdf_url": "not-a-valid-url"})
+    assert response.status_code == 422
 
 
 def test_convert_endpoint_missing_url():
-    """Test convert endpoint with missing URL."""
     response = client.post("/convert", json={})
-    assert response.status_code == 422  # Validation error
+    assert response.status_code == 422
 
 
 def test_convert_endpoint_invalid_css_mode():
-    """Test convert endpoint with invalid CSS mode."""
-    response = client.post(
-        "/convert",
-        json={
-            "pdf_url": "https://example.com/test.pdf",
-            "css_mode": "invalid_mode"
-        }
-    )
-    assert response.status_code == 500  # Will fail during processing, not validation
+    """ValueError from pipeline is wrapped as 500 by the route handler."""
+    with (
+        patch(
+            "src.pdf2html_api.main.ConversionPipeline.execute",
+            new=AsyncMock(side_effect=ValueError("CSS mode ... got invalid_mode")),
+        ),
+        patch("src.pdf2html_api.main._cleanup_files"),
+    ):
+        response = client.post(
+            "/convert",
+            json={"pdf_url": "https://example.com/test.pdf", "css_mode": "invalid_mode"},
+        )
+    assert response.status_code == 500
 
 
-@patch('src.pdf2html_api.main.get_settings')
-@patch('src.pdf2html_api.main._download_pdf_from_url')
-@patch('src.pdf2html_api.main.render_pdf_to_images')
-@patch('src.pdf2html_api.main.HTMLGenerator')
-@patch('src.pdf2html_api.main.merge_pages')
-def test_convert_endpoint_success(
-    mock_merge_pages,
-    mock_html_generator_class,
-    mock_render_pdf,
-    mock_download_pdf,
-    mock_get_settings
-):
-    """Test successful PDF conversion."""
-    # Mock settings
-    mock_settings = MagicMock()
-    mock_settings.openai_api_key = "test-key"
-    mock_settings.model = "gpt-4o-mini"
-    mock_settings.dpi = 200
-    mock_settings.max_tokens = 4000
-    mock_settings.temperature = 0.0
-    mock_settings.css_mode = "grid"
-    mock_get_settings.return_value = mock_settings
-    
-    # Mock PDF download – must be a real Path so pdf_path.stat() doesn't raise
-    tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
-    tmp.write(b"%PDF-1.4 stub")
-    tmp.close()
-    mock_download_pdf.return_value = Path(tmp.name)
-
-    # Mock PDF to images
-    mock_render_pdf.return_value = (["/tmp/page1.png"], MagicMock())
-
-    # Mock HTML generator
-    mock_html_generator = MagicMock()
-    mock_html_generator.image_page_to_html.return_value = '<section class="page"><p>Test content</p></section>'
-    mock_html_generator_class.return_value = mock_html_generator
-
-    # Mock HTML merge
-    mock_merge_pages.return_value = '<!DOCTYPE html><html><body><p>Test content</p></body></html>'
-
-    response = client.post(
-        "/convert",
-        json={
-            "pdf_url": "https://example.com/test.pdf",
-            "css_mode": "grid"
-        }
-    )
-
+def test_convert_endpoint_success():
+    result = _make_result()
+    with (
+        patch(
+            "src.pdf2html_api.main.ConversionPipeline.execute",
+            new=AsyncMock(return_value=result),
+        ),
+        patch("src.pdf2html_api.main._cleanup_files"),
+    ):
+        response = client.post(
+            "/convert",
+            json={"pdf_url": "https://example.com/test.pdf", "css_mode": "grid"},
+        )
     assert response.status_code == 200
     data = response.json()
     assert "html" in data
@@ -113,51 +98,19 @@ def test_convert_endpoint_success(
     assert data["css_mode"] == "grid"
 
 
-@patch('src.pdf2html_api.main.get_settings')
-@patch('src.pdf2html_api.main._download_pdf_from_url')
-@patch('src.pdf2html_api.main.render_pdf_to_images')
-@patch('src.pdf2html_api.main.HTMLGenerator')
-@patch('src.pdf2html_api.main.merge_pages')
-def test_convert_html_endpoint_success(
-    mock_merge_pages,
-    mock_html_generator_class,
-    mock_render_pdf,
-    mock_download_pdf,
-    mock_get_settings
-):
-    """Test successful PDF conversion with direct HTML response."""
-    # Mock settings
-    mock_settings = MagicMock()
-    mock_settings.openai_api_key = "test-key"
-    mock_settings.model = "gpt-4o-mini"
-    mock_settings.dpi = 200
-    mock_settings.max_tokens = 4000
-    mock_settings.temperature = 0.0
-    mock_settings.css_mode = "grid"
-    mock_get_settings.return_value = mock_settings
-    
-    # Mock PDF download
-    mock_download_pdf.return_value = "/tmp/test.pdf"
-    
-    # Mock PDF to images
-    mock_render_pdf.return_value = (["/tmp/page1.png"], MagicMock())
-    
-    # Mock HTML generator
-    mock_html_generator = MagicMock()
-    mock_html_generator.image_page_to_html.return_value = '<section class="page"><p>Test content</p></section>'
-    mock_html_generator_class.return_value = mock_html_generator
-    
-    # Mock HTML merge
-    mock_merge_pages.return_value = '<!DOCTYPE html><html><body><p>Test content</p></body></html>'
-    
-    response = client.post(
-        "/convert/html",
-        json={
-            "pdf_url": "https://example.com/test.pdf",
-            "css_mode": "grid"
-        }
-    )
-    
+def test_convert_html_endpoint_success():
+    result = _make_result()
+    with (
+        patch(
+            "src.pdf2html_api.main.ConversionPipeline.execute",
+            new=AsyncMock(return_value=result),
+        ),
+        patch("src.pdf2html_api.main._cleanup_files"),
+    ):
+        response = client.post(
+            "/convert/html",
+            json={"pdf_url": "https://example.com/test.pdf", "css_mode": "grid"},
+        )
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/html; charset=utf-8"
-    assert "<!DOCTYPE html>" in response.text 
+    assert "<!DOCTYPE html>" in response.text
