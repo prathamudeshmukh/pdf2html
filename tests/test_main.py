@@ -233,15 +233,13 @@ class TestConvertMultiPageSuccess:
 
 
 class TestConversionPipelineConfiguration:
-    _SETTINGS_PATH = "src.pdf2html_api.services.conversion_pipeline.get_settings"
+    _SETTINGS_PATH = "src.pdf2html_api.services.settings_configurator.SettingsConfigurator.configure"
 
     def _make_pipeline(self, **request_kwargs):
-        mock_settings = _make_settings_mock()
-        with patch(self._SETTINGS_PATH, return_value=mock_settings):
-            pipeline = ConversionPipeline(
-                PDFRequest(pdf_url="https://example.com/test.pdf", **request_kwargs)
-            )
-        return pipeline, mock_settings
+        pipeline = ConversionPipeline(
+            PDFRequest(pdf_url="https://example.com/test.pdf", **request_kwargs)
+        )
+        return pipeline, pipeline._settings
 
     def test_model_override(self):
         _, s = self._make_pipeline(model="gpt-4o")
