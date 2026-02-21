@@ -75,7 +75,7 @@ def _patch_pipeline(result=None, exc=None):
 
 class TestPageProcessor:
     def _run(self, coro):
-        return asyncio.get_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
     def _gen(self, *page_htmls):
         g = MagicMock()
