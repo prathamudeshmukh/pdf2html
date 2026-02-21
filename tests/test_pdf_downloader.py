@@ -18,7 +18,7 @@ from src.pdf2html_api.services.pdf_downloader import PDFDownloader
 
 class TestPDFDownloader:
     def _run(self, coro):
-        return asyncio.get_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
     def _mock_httpx_client(self, content: bytes, content_type: str, *, raise_error=None):
         mock_client = AsyncMock()
