@@ -1,38 +1,35 @@
 """
-Tests for src/pdf2html_api/main.py and the services it delegates to.
+Tests for src/pdf2html_api/main.py and its HTTP endpoints.
 
 Coverage
 --------
 - GET /  and  GET /health
 - POST /convert  and  POST /convert/html  (HTTP contract)
-- ConversionPipeline._configure_settings  (request → Settings wiring)
 - Invalid CSS mode  (ValueError → 500 characterisation)
 - Pipeline failures  (propagation as 500)
-- Page-failure graceful degradation (via HTML body inspection)
-- PDFDownloader.download  (all success / error branches)
-- PageProcessor.process_pages  (happy path + per-page error handling)
 - _cleanup_files  (idempotency + collaborator calls)
 - PDFRequest / PDFResponse  (model defaults and schema)
 - App metadata
+
+See also
+--------
+- test_conversion_pipeline.py  – ConversionPipeline._configure_settings
+- test_pdf_downloader.py        – PDFDownloader.download
+- test_page_processor.py        – PageProcessor.process_pages
 """
 
-import asyncio
 import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from src.pdf2html_api.main import PDFRequest, PDFResponse, _cleanup_files, app
 from src.pdf2html_api.services.conversion_pipeline import (
     ConversionArtifacts,
-    ConversionPipeline,
     ConversionResult,
 )
-from src.pdf2html_api.services.page_processor import PageProcessor
-from src.pdf2html_api.services.pdf_downloader import PDFDownloader
 
 client = TestClient(app)
 
@@ -89,18 +86,6 @@ def _patch_pipeline(result=None, exc=None):
         )
     stack.enter_context(patch("src.pdf2html_api.main._cleanup_files"))
     return stack, resolved
-
-
-def _make_settings_mock(**kw):
-    m = MagicMock()
-    m.model = kw.get("model", "gpt-4o-mini")
-    m.dpi = kw.get("dpi", 200)
-    m.max_tokens = kw.get("max_tokens", 4000)
-    m.temperature = kw.get("temperature", 0.0)
-    m.css_mode = kw.get("css_mode", "grid")
-    m.max_parallel_workers = kw.get("max_parallel_workers", 3)
-    m.openai_api_key = kw.get("openai_api_key", "test-key")
-    return m
 
 
 # ===========================================================================
@@ -228,53 +213,6 @@ class TestConvertMultiPageSuccess:
 
 
 # ===========================================================================
-# ConversionPipeline configuration: request params → Settings
-# ===========================================================================
-
-
-class TestConversionPipelineConfiguration:
-    _SETTINGS_PATH = "src.pdf2html_api.services.settings_configurator.SettingsConfigurator.configure"
-
-    def _make_pipeline(self, **request_kwargs):
-        pipeline = ConversionPipeline(
-            PDFRequest(pdf_url="https://example.com/test.pdf", **request_kwargs)
-        )
-        return pipeline, pipeline._settings
-
-    def test_model_override(self):
-        _, s = self._make_pipeline(model="gpt-4o")
-        assert s.model == "gpt-4o"
-
-    def test_dpi_override(self):
-        _, s = self._make_pipeline(dpi=300)
-        assert s.dpi == 300
-
-    def test_max_tokens_override(self):
-        _, s = self._make_pipeline(max_tokens=2000)
-        assert s.max_tokens == 2000
-
-    def test_temperature_override(self):
-        _, s = self._make_pipeline(temperature=0.7)
-        assert s.temperature == 0.7
-
-    def test_max_parallel_workers_override(self):
-        _, s = self._make_pipeline(max_parallel_workers=5)
-        assert s.max_parallel_workers == 5
-
-    def test_css_mode_columns_accepted(self):
-        _, s = self._make_pipeline(css_mode="columns")
-        assert s.css_mode == "columns"
-
-    def test_css_mode_single_accepted(self):
-        _, s = self._make_pipeline(css_mode="single")
-        assert s.css_mode == "single"
-
-    def test_default_css_mode_is_grid(self):
-        _, s = self._make_pipeline()
-        assert s.css_mode == "grid"
-
-
-# ===========================================================================
 # CSS mode variants – accepted end-to-end
 # ===========================================================================
 
@@ -395,188 +333,6 @@ class TestConvertHtmlEndpoint:
         with stack:
             r = client.post("/convert/html", json={"pdf_url": "https://example.com/test.pdf"})
         assert r.status_code == 200
-
-
-# ===========================================================================
-# PDFDownloader – unit tests
-# ===========================================================================
-
-
-class TestPDFDownloader:
-    def _run(self, coro):
-        return asyncio.get_event_loop().run_until_complete(coro)
-
-    def _mock_httpx_client(self, content: bytes, content_type: str, *, raise_error=None):
-        mock_client = AsyncMock()
-        mock_response = MagicMock()
-        mock_response.content = content
-        mock_response.headers = {"content-type": content_type}
-        mock_response.raise_for_status = MagicMock()
-        if raise_error is not None:
-            mock_client.get = AsyncMock(side_effect=raise_error)
-        else:
-            mock_client.get = AsyncMock(return_value=mock_response)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        return mock_client
-
-    def _patch(self, mock_client):
-        return patch(
-            "src.pdf2html_api.services.pdf_downloader.httpx.AsyncClient",
-            return_value=mock_client,
-        )
-
-    # happy path
-
-    def test_success_returns_path(self):
-        pdf_bytes = b"%PDF-1.4 fake"
-        mc = self._mock_httpx_client(pdf_bytes, "application/pdf")
-        with self._patch(mc):
-            result = self._run(PDFDownloader().download("https://example.com/doc.pdf"))
-        assert isinstance(result, Path)
-        assert result.suffix == ".pdf"
-        assert result.exists()
-        result.unlink()
-
-    def test_success_file_contains_pdf_content(self):
-        pdf_bytes = b"%PDF-1.4 fake"
-        mc = self._mock_httpx_client(pdf_bytes, "application/pdf")
-        with self._patch(mc):
-            result = self._run(PDFDownloader().download("https://example.com/doc.pdf"))
-        assert result.read_bytes() == pdf_bytes
-        result.unlink()
-
-    def test_url_ending_in_pdf_bypasses_content_type_check(self):
-        pdf_bytes = b"%PDF-1.4 content"
-        mc = self._mock_httpx_client(pdf_bytes, "application/octet-stream")
-        with self._patch(mc):
-            result = self._run(PDFDownloader().download("https://example.com/document.pdf"))
-        assert result.exists()
-        result.unlink()
-
-    def test_raise_for_status_is_called(self):
-        pdf_bytes = b"%PDF-1.4 content"
-        mc = self._mock_httpx_client(pdf_bytes, "application/pdf")
-        with self._patch(mc):
-            result = self._run(PDFDownloader().download("https://example.com/document.pdf"))
-        mc.get.return_value.raise_for_status.assert_called_once()
-        result.unlink()
-
-    # error branches
-
-    def test_non_pdf_content_type_raises_http_exception(self):
-        from fastapi import HTTPException
-        mc = self._mock_httpx_client(b"<html/>", "text/html")
-        with self._patch(mc):
-            with pytest.raises(HTTPException) as exc_info:
-                self._run(PDFDownloader().download("https://example.com/page"))
-        assert "URL does not point to a PDF file" in exc_info.value.detail
-
-    def test_http_status_error_raises_400(self):
-        from fastapi import HTTPException
-        err_resp = MagicMock()
-        err_resp.status_code = 404
-        http_err = httpx.HTTPStatusError("Not found", request=MagicMock(), response=err_resp)
-        mc = self._mock_httpx_client(b"", "application/pdf", raise_error=http_err)
-        with self._patch(mc):
-            with pytest.raises(HTTPException) as exc_info:
-                self._run(PDFDownloader().download("https://example.com/missing.pdf"))
-        assert exc_info.value.status_code == 400
-        assert "404" in exc_info.value.detail
-
-    def test_request_error_raises_400(self):
-        from fastapi import HTTPException
-        mc = self._mock_httpx_client(b"", "application/pdf", raise_error=httpx.ConnectError("refused"))
-        with self._patch(mc):
-            with pytest.raises(HTTPException) as exc_info:
-                self._run(PDFDownloader().download("https://example.com/test.pdf"))
-        assert exc_info.value.status_code == 400
-
-    def test_unexpected_error_raises_500(self):
-        from fastapi import HTTPException
-        mc = self._mock_httpx_client(b"", "application/pdf", raise_error=MemoryError("oom"))
-        with self._patch(mc):
-            with pytest.raises(HTTPException) as exc_info:
-                self._run(PDFDownloader().download("https://example.com/test.pdf"))
-        assert exc_info.value.status_code == 500
-
-
-# ===========================================================================
-# PageProcessor – unit tests
-# ===========================================================================
-
-
-class TestPageProcessor:
-    def _run(self, coro):
-        return asyncio.get_event_loop().run_until_complete(coro)
-
-    def _gen(self, *page_htmls):
-        g = MagicMock()
-        g.image_page_to_html.side_effect = list(page_htmls)
-        return g
-
-    def test_single_page_returns_list_of_one(self):
-        g = self._gen('<section class="page">P1</section>')
-        result = self._run(PageProcessor().process_pages(g, ["img1.png"], "grid", "r", 1))
-        assert len(result) == 1
-
-    def test_multi_page_returns_correct_count(self):
-        pages = [f'<section class="page">P{i}</section>' for i in range(4)]
-        g = self._gen(*pages)
-        result = self._run(
-            PageProcessor().process_pages(g, ["i1.png", "i2.png", "i3.png", "i4.png"], "grid", "r", 2)
-        )
-        assert len(result) == 4
-
-    def test_page_order_preserved(self):
-        def side(path, css_mode):
-            idx = int(path.replace("img", "").replace(".png", ""))
-            return f'<section class="page">Page{idx}</section>'
-        g = MagicMock()
-        g.image_page_to_html.side_effect = side
-        result = self._run(
-            PageProcessor().process_pages(g, ["img0.png", "img1.png", "img2.png"], "grid", "r", 3)
-        )
-        assert result[0] == '<section class="page">Page0</section>'
-        assert result[1] == '<section class="page">Page1</section>'
-        assert result[2] == '<section class="page">Page2</section>'
-
-    def test_css_mode_forwarded_to_generator(self):
-        g = self._gen('<section class="page">x</section>')
-        self._run(PageProcessor().process_pages(g, ["img1.png"], "columns", "r", 1))
-        g.image_page_to_html.assert_called_once_with("img1.png", "columns")
-
-    def test_exception_replaced_with_placeholder(self):
-        g = MagicMock()
-        g.image_page_to_html.side_effect = RuntimeError("llm failed")
-        result = self._run(PageProcessor().process_pages(g, ["img1.png"], "grid", "r", 1))
-        assert len(result) == 1
-        assert "ocr-uncertain" in result[0]
-        assert "Error processing page 1" in result[0]
-
-    def test_partial_failure_does_not_drop_successful_pages(self):
-        def side(path, css_mode):
-            if "img1" in path:
-                return '<section class="page">OK</section>'
-            raise RuntimeError("page 2 failed")
-        g = MagicMock()
-        g.image_page_to_html.side_effect = side
-        result = self._run(
-            PageProcessor().process_pages(g, ["img1.png", "img2.png"], "grid", "r", 2)
-        )
-        assert len(result) == 2
-        assert result[0] == '<section class="page">OK</section>'
-        assert "ocr-uncertain" in result[1]
-
-    def test_page_failure_endpoint_returns_200(self):
-        result_with_error = _make_result(
-            html='<!DOCTYPE html><html><body><p class="ocr-uncertain">[Error processing page 1: oops]</p></body></html>'
-        )
-        stack, _ = _patch_pipeline(result_with_error)
-        with stack:
-            response = client.post("/convert", json={"pdf_url": "https://example.com/test.pdf"})
-        assert response.status_code == 200
-        assert "ocr-uncertain" in response.json()["html"]
 
 
 # ===========================================================================
