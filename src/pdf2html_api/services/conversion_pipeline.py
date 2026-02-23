@@ -83,31 +83,12 @@ class ConversionPipeline:
         )
 
         final_html = merge_pages(page_html_list, self._settings.css_mode)
-        
-        html_with_variables = None
-        sample_json = None
 
-        if self._request.extract_variables:
-            logger.info(f"[{request_id}] Extracting template variables from HTML")
-
-            extractor = SampleJSONExtractor(
-                api_key=self._settings.openai_api_key,
-                model=self._settings.model,
-                temperature=0.0,
-                max_tokens=2000,
-            )
-
-            try:
-                sample_json = extractor.extract(final_html)
-                html_with_variables = apply_sample_json_to_html(final_html, sample_json)
-
-                logger.info(
-                    f"[{request_id}] Variable detection completed "
-                    f"({len(sample_json)} variables)"
-                )
-            except Exception as e:
-                logger.error(f"[{request_id}] Variable extraction failed: {e}")
-                # IMPORTANT: do not fail PDF conversion
+        html_with_variables, sample_json = (
+            self._extract_variables(final_html, request_id)
+            if self._request.extract_variables
+            else (None, None)
+        )
 
         elapsed = time.time() - total_start
         logger.info(
@@ -116,7 +97,7 @@ class ConversionPipeline:
         )
 
         return ConversionResult(
-            html=html_with_variables if self._request.extract_variables and html_with_variables else final_html,
+            html=html_with_variables or final_html,
             pages_processed=len(page_html_list),
             model_used=self._settings.model,
             css_mode=self._settings.css_mode,
@@ -125,5 +106,36 @@ class ConversionPipeline:
                 image_paths=image_paths,
                 temp_dir=temp_dir,
             ),
-            sample_json=sample_json if self._request.extract_variables else None
+            sample_json=sample_json,
         )
+
+    def _extract_variables(
+        self, final_html: str, request_id: str
+    ) -> tuple[Optional[str], Optional[dict]]:
+        """Extract template variables from converted HTML.
+
+        Returns a (html_with_variables, sample_json) tuple, or (None, None)
+        when extraction fails so the caller can fall back to the original HTML.
+        """
+        logger.info(f"[{request_id}] Extracting template variables from HTML")
+
+        extractor = SampleJSONExtractor(
+            api_key=self._settings.openai_api_key,
+            model=self._settings.model,
+            temperature=0.0,
+            max_tokens=2000,
+        )
+
+        try:
+            sample_json = extractor.extract(final_html)
+            html_with_variables = apply_sample_json_to_html(final_html, sample_json)
+
+            logger.info(
+                f"[{request_id}] Variable detection completed "
+                f"({len(sample_json)} variables)"
+            )
+            return html_with_variables, sample_json
+        except Exception as e:
+            logger.error(f"[{request_id}] Variable extraction failed: {e}")
+            # IMPORTANT: do not fail PDF conversion
+            return None, None
