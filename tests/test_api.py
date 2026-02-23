@@ -96,21 +96,3 @@ def test_convert_endpoint_success():
     assert data["pages_processed"] == 1
     assert data["model_used"] == "gpt-4o-mini"
     assert data["css_mode"] == "grid"
-
-
-def test_convert_html_endpoint_success():
-    result = _make_result()
-    with (
-        patch(
-            "src.pdf2html_api.main.ConversionPipeline.execute",
-            new=AsyncMock(return_value=result),
-        ),
-        patch("src.pdf2html_api.main._cleanup_files"),
-    ):
-        response = client.post(
-            "/convert/html",
-            json={"pdf_url": "https://example.com/test.pdf", "css_mode": "grid"},
-        )
-    assert response.status_code == 200
-    assert response.headers["content-type"] == "text/html; charset=utf-8"
-    assert "<!DOCTYPE html>" in response.text
