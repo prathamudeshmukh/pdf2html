@@ -57,6 +57,7 @@ class PDFRequest(BaseModel):
     temperature: Optional[float] = 0.0
     css_mode: Optional[str] = "grid"
     max_parallel_workers: Optional[int] = 3
+    extract_variables: Optional[bool] = False
 
 
 class PDFResponse(BaseModel):
@@ -66,6 +67,7 @@ class PDFResponse(BaseModel):
     pages_processed: int
     model_used: str
     css_mode: str
+    sample_json: Optional[dict[str, str]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +118,7 @@ async def convert_pdf_to_html(
             pages_processed=result.pages_processed,
             model_used=result.model_used,
             css_mode=result.css_mode,
+            sample_json=result.sample_json,
         )
 
     except Exception as exc:
