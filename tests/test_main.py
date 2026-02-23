@@ -4,7 +4,7 @@ Tests for src/pdf2html_api/main.py and its HTTP endpoints.
 Coverage
 --------
 - GET /  and  GET /health
-- POST /convert  and  POST /convert/html  (HTTP contract)
+- POST /convert  (HTTP contract)
 - Invalid CSS mode  (ValueError → 500 characterisation)
 - Pipeline failures  (propagation as 500)
 - _cleanup_files  (idempotency + collaborator calls)
@@ -284,55 +284,6 @@ class TestConvertPipelineFailure:
 
     def test_500_detail_contains_conversion_failed(self):
         assert "Conversion failed" in self._post(RuntimeError("boom")).json()["detail"]
-
-
-# ===========================================================================
-# POST /convert/html
-# ===========================================================================
-
-
-class TestConvertHtmlEndpoint:
-    def test_status_200(self):
-        stack, _ = _patch_pipeline()
-        with stack:
-            r = client.post("/convert/html", json={"pdf_url": "https://example.com/test.pdf"})
-        assert r.status_code == 200
-
-    def test_content_type_is_text_html(self):
-        stack, _ = _patch_pipeline()
-        with stack:
-            r = client.post("/convert/html", json={"pdf_url": "https://example.com/test.pdf"})
-        assert "text/html" in r.headers["content-type"]
-
-    def test_response_body_contains_doctype(self):
-        stack, _ = _patch_pipeline()
-        with stack:
-            r = client.post("/convert/html", json={"pdf_url": "https://example.com/test.pdf"})
-        assert "<!DOCTYPE html>" in r.text
-
-    def test_invalid_css_mode_returns_500(self):
-        stack, _ = _patch_pipeline(exc=ValueError("CSS mode ... got nope"))
-        with stack:
-            r = client.post(
-                "/convert/html",
-                json={"pdf_url": "https://example.com/test.pdf", "css_mode": "nope"},
-            )
-        assert r.status_code == 500
-
-    def test_missing_url_returns_422(self):
-        assert client.post("/convert/html", json={}).status_code == 422
-
-    def test_pipeline_failure_returns_500(self):
-        stack, _ = _patch_pipeline(exc=RuntimeError("network error"))
-        with stack:
-            r = client.post("/convert/html", json={"pdf_url": "https://example.com/test.pdf"})
-        assert r.status_code == 500
-
-    def test_multi_page_returns_200(self):
-        stack, _ = _patch_pipeline(_make_result(pages_processed=2))
-        with stack:
-            r = client.post("/convert/html", json={"pdf_url": "https://example.com/test.pdf"})
-        assert r.status_code == 200
 
 
 # ===========================================================================
