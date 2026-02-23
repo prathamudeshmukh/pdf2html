@@ -13,7 +13,7 @@ class SampleJSONExtractor:
         self.temperature = temperature
         self.max_tokens = max_tokens
 
-        prompt_path = Path(__file__).resolve().parent / "prompts" / "html_to_sample_json.md"
+        prompt_path = Path(__file__).resolve().parent.parent / "prompts" / "html_to_sample_json.md"
         self.system_prompt = prompt_path.read_text(encoding="utf-8")
 
     def extract(self, html: str) -> dict:
@@ -29,10 +29,15 @@ class SampleJSONExtractor:
 
         content = response.choices[0].message.content.strip()
 
+        # Strip markdown code fences if the LLM wraps the response in ```json ... ```
+        if content.startswith("```"):
+            content = content.split("\n", 1)[-1]  # drop the opening ```json line
+            content = content.rsplit("```", 1)[0].strip()  # drop the closing ```
+
         try:
             data = json.loads(content)
         except json.JSONDecodeError as e:
-            logger.error("Invalid JSON returned by LLM")
+            logger.error(f"Invalid JSON returned by LLM: {content}")
             raise ValueError("LLM returned invalid JSON") from e
 
         if not isinstance(data, dict):

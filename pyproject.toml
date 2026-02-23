@@ -58,4 +58,12 @@ where = ["src"]
 "" = "src"
 
 [tool.setuptools.package-data]
-"pdf2html_api" = ["prompts/*.md"] 
+"pdf2html_api" = ["prompts/*.md"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+asyncio_mode = "auto"
+filterwarnings = [
+    # PyMuPDF SWIG C-extension warnings — not actionable from user code
+    "ignore:builtin type .* has no __module__ attribute:DeprecationWarning",
+]
