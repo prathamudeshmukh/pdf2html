@@ -162,7 +162,7 @@ class HTMLGenerator:
                         ],
                     },
                 ],
-                max_tokens=self.max_tokens,
+                max_completion_tokens=self.max_tokens,
                 temperature=self.temperature,
             )
             
