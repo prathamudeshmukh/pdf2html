@@ -368,6 +368,44 @@ async def convert_pdf_to_html_async(
     return AsyncJobResponse(job_id=job_id)
 
 
+@app.get(
+    "/jobs/{job_id}",
+    tags=["Conversion"],
+    summary="Poll async conversion job status",
+)
+async def get_job_status(job_id: str):
+    """Return the current status of an async conversion job.
+
+    Always returns pages_done and pages_total so callers can render a progress bar.
+    Returns 404 when the job_id is unknown.
+    """
+    job = job_store.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job {job_id!r} not found")
+
+    status = job["status"]
+
+    if status == "failed":
+        return {"status": "failed", "error": job["error"]}
+
+    base = {
+        "status": status,
+        "pages_done": job["pages_done"],
+        "pages_total": job["pages_total"],
+    }
+
+    if status == "done":
+        result = job["result"]
+        return {
+            **base,
+            "html": result["html"],
+            "sample_json": result["sample_json"],
+            "pages_processed": result["pages_processed"],
+        }
+
+    return base
+
+
 # ---------------------------------------------------------------------------
 # Markdown request / response models
 # ---------------------------------------------------------------------------
