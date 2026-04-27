@@ -1,10 +1,12 @@
 """Service for converting PDF page images to HTML."""
 
 import asyncio
+import functools
+import threading
 import time
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from typing import List
+from typing import Callable, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,7 @@ class PageProcessor:
         css_mode: str,
         request_id: str,
         max_workers: int = 3,
+        on_page_done: Optional[Callable[[int, int], None]] = None,
     ) -> List[str]:
         """
         Convert every page image to HTML, preserving order.
@@ -41,6 +44,9 @@ class PageProcessor:
             css_mode:       CSS layout mode passed to the generator.
             request_id:     Identifier used for correlated log lines.
             max_workers:    Maximum parallel threads when len(image_paths) > 1.
+            on_page_done:   Optional callback(pages_done, total_pages) fired after
+                            each page completes (including error placeholders).
+                            Safe to call from threads.
 
         Returns:
             Ordered list of HTML strings, one per page.
@@ -48,20 +54,30 @@ class PageProcessor:
             instead of aborting the whole conversion.
         """
         total = len(image_paths)
+        done_count = [0]
+        done_lock = threading.Lock()
+
+        def _report():
+            if on_page_done is None:
+                return
+            with done_lock:
+                done_count[0] += 1
+                n = done_count[0]
+            on_page_done(n, total)
 
         if total == 1:
-            return [
-                self._convert_page(
-                    html_generator, image_paths[0], 0, total, css_mode, request_id
-                )
-            ]
+            html = self._convert_page(
+                html_generator, image_paths[0], 0, total, css_mode, request_id
+            )
+            _report()
+            return [html]
 
         logger.info(
             f"[{request_id}] Starting parallel processing: "
             f"{total} pages, {max_workers} workers"
         )
         return await self._process_parallel(
-            html_generator, image_paths, css_mode, request_id, max_workers
+            html_generator, image_paths, css_mode, request_id, max_workers, _report
         )
 
     # ------------------------------------------------------------------
@@ -75,6 +91,7 @@ class PageProcessor:
         css_mode: str,
         request_id: str,
         max_workers: int,
+        page_done_hook: Optional[Callable] = None,
     ) -> List[str]:
         """Submit all pages to a thread pool and gather results in order."""
         loop = asyncio.get_event_loop()
@@ -84,13 +101,16 @@ class PageProcessor:
             futures = [
                 loop.run_in_executor(
                     executor,
-                    self._convert_page,
-                    html_generator,
-                    path,
-                    index,
-                    total,
-                    css_mode,
-                    request_id,
+                    functools.partial(
+                        self._convert_page,
+                        html_generator,
+                        path,
+                        index,
+                        total,
+                        css_mode,
+                        request_id,
+                        page_done_hook,
+                    ),
                 )
                 for index, path in enumerate(image_paths)
             ]
@@ -119,6 +139,7 @@ class PageProcessor:
         total_pages: int,
         css_mode: str,
         request_id: str,
+        page_done_hook: Optional[Callable] = None,
     ) -> str:
         """Convert a single page; return an error placeholder on failure."""
         page_num = page_index + 1
@@ -139,3 +160,6 @@ class PageProcessor:
                 f"[{request_id}] Page {page_num} failed after {elapsed:.3f}s: {exc}"
             )
             return _ERROR_PLACEHOLDER.format(index=page_num, error=exc)
+        finally:
+            if page_done_hook is not None:
+                page_done_hook()

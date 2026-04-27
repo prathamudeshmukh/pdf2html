@@ -56,7 +56,7 @@ class ConversionPipeline:
         self._downloader = PDFDownloader()
         self._page_processor = PageProcessor()
 
-    async def execute(self, request_id: str) -> ConversionResult:
+    async def execute(self, request_id: str, progress_callback=None) -> ConversionResult:
         CSSModeValidator.validate(self._settings.css_mode)
 
         total_start = time.time()
@@ -73,6 +73,9 @@ class ConversionPipeline:
         image_paths, temp_dir = render_pdf_to_images(pdf_path, self._settings.dpi)
         logger.info(f"[{request_id}] Rendered {len(image_paths)} page image(s)")
 
+        if progress_callback is not None:
+            progress_callback.on_pages_total(len(image_paths))
+
         html_generator = HTMLGeneratorFactory.build(self._settings)
         page_html_list = await self._page_processor.process_pages(
             html_generator,
@@ -80,6 +83,7 @@ class ConversionPipeline:
             self._settings.css_mode,
             request_id,
             self._settings.max_parallel_workers,
+            on_page_done=progress_callback.on_page_done if progress_callback else None,
         )
 
         final_html = merge_pages(page_html_list, self._settings.css_mode)

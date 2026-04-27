@@ -5,6 +5,7 @@ This module is intentionally kept thin: it owns the HTTP contract
 all business logic to the services layer.
 """
 
+import asyncio
 import logging
 import time
 from typing import Annotated, Optional
@@ -15,6 +16,11 @@ from pydantic import BaseModel, Field, HttpUrl
 from .pdf_to_images import cleanup_temp_images
 from .services.conversion_pipeline import ConversionArtifacts, ConversionPipeline
 from .services.markdown_pipeline import MarkdownConversionArtifacts, MarkdownConversionPipeline
+from .services.job_store import JobStore
+from .services.markdown_pipeline import MarkdownConversionArtifacts, MarkdownConversionPipeline
+
+# Module-level store shared across all requests
+job_store = JobStore()
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -195,6 +201,48 @@ class PDFResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Async conversion helpers
+# ---------------------------------------------------------------------------
+
+
+class _PipelineProgress:
+    """Bridges ConversionPipeline progress events to the JobStore."""
+
+    def __init__(self, job_id: str, store: JobStore) -> None:
+        self._job_id = job_id
+        self._store = store
+
+    def on_pages_total(self, pages_total: int) -> None:
+        self._store.set_processing(self._job_id, pages_total)
+
+    def on_page_done(self, pages_done: int, pages_total: int) -> None:
+        self._store.increment_page_done(self._job_id)
+
+
+def _run_conversion_background(job_id: str, request: "PDFRequest", store: JobStore) -> None:
+    """Synchronous background task that runs the conversion pipeline."""
+    progress = _PipelineProgress(job_id, store)
+    pipeline = ConversionPipeline(request)
+    request_id = f"async_{job_id[:8]}"
+    try:
+        import asyncio as _asyncio
+        result = _asyncio.run(pipeline.execute(request_id, progress_callback=progress))
+        _cleanup_files(result.artifacts)
+        store.set_done(job_id, {
+            "html": result.html,
+            "sample_json": result.sample_json,
+            "pages_processed": result.pages_processed,
+        })
+    except Exception as exc:
+        logger.error(f"[{request_id}] Async conversion failed: {exc}")
+        store.set_failed(job_id, str(exc))
+
+
+class AsyncJobResponse(BaseModel):
+    job_id: str
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
@@ -299,6 +347,233 @@ async def convert_pdf_to_html(
         raise HTTPException(
             status_code=500, detail=f"Conversion failed: {exc}"
         ) from exc
+
+
+# ---------------------------------------------------------------------------
+# Markdown request / response models
+# ---------------------------------------------------------------------------
+
+
+class MarkdownRequest(BaseModel):
+    """Request model for PDF-to-Markdown conversion."""
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "pdf_url": "https://example.com/sample.pdf",
+                    "model": "gpt-4o-mini",
+                    "dpi": 200,
+                    "max_tokens": 4000,
+                    "temperature": 0.0,
+                    "max_parallel_workers": 3,
+                }
+            ]
+        }
+    }
+
+    pdf_url: Annotated[
+        HttpUrl,
+        Field(
+            description="Publicly accessible URL of the PDF file to convert.",
+            examples=["https://example.com/sample.pdf"],
+        ),
+    ]
+    model: Annotated[
+        Optional[str],
+        Field(
+            default="gpt-4o-mini",
+            description="OpenAI vision model used for page analysis.",
+            examples=["gpt-4o-mini", "gpt-4o"],
+        ),
+    ] = "gpt-4o-mini"
+    dpi: Annotated[
+        Optional[int],
+        Field(
+            default=200,
+            ge=72,
+            le=600,
+            description="Resolution (dots per inch) used when rasterising each PDF page.",
+            examples=[150, 200, 300],
+        ),
+    ] = 200
+    max_tokens: Annotated[
+        Optional[int],
+        Field(
+            default=4000,
+            ge=256,
+            le=16384,
+            description="Maximum number of tokens the model may generate per page.",
+            examples=[2000, 4000, 8000],
+        ),
+    ] = 4000
+    temperature: Annotated[
+        Optional[float],
+        Field(
+            default=0.0,
+            ge=0.0,
+            le=2.0,
+            description="Sampling temperature for the model.",
+            examples=[0.0, 0.2],
+        ),
+    ] = 0.0
+    max_parallel_workers: Annotated[
+        Optional[int],
+        Field(
+            default=3,
+            ge=1,
+            le=10,
+            description="Number of PDF pages processed concurrently.",
+            examples=[1, 3, 5],
+        ),
+    ] = 3
+
+
+_MARKDOWN_RESPONSE_EXAMPLE = {
+    "markdown": "# Invoice\n\n| Item | Price |\n| --- | --- |\n| Widget | $9.99 |",
+    "pages_processed": 2,
+    "model_used": "gpt-4o-mini",
+}
+
+
+class MarkdownResponse(BaseModel):
+    """Response model for PDF-to-Markdown conversion."""
+
+    model_config = {"json_schema_extra": {"examples": [_MARKDOWN_RESPONSE_EXAMPLE]}}
+
+    markdown: Annotated[
+        str,
+        Field(description="Merged Markdown document generated from all PDF pages."),
+    ]
+    pages_processed: Annotated[
+        int,
+        Field(description="Number of pages that were successfully converted.", ge=0),
+    ]
+    model_used: Annotated[
+        str,
+        Field(description="OpenAI model that performed the conversion."),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Markdown route
+# ---------------------------------------------------------------------------
+
+
+@app.post(
+    "/convert/markdown",
+    response_model=MarkdownResponse,
+    tags=["Conversion"],
+    summary="Convert PDF to Markdown",
+    response_description="Merged Markdown document and conversion metadata",
+    responses={
+        200: {
+            "description": "PDF successfully converted. Returns merged Markdown and metadata.",
+        },
+        422: {
+            "description": "Validation error – the request body is malformed or a required field is missing.",
+        },
+        500: {
+            "description": "Internal error during conversion (e.g. OpenAI API failure, invalid PDF).",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Conversion failed: <error message>"}
+                }
+            },
+        },
+    },
+)
+async def convert_pdf_to_markdown(
+    request: MarkdownRequest, background_tasks: BackgroundTasks
+):
+    """
+    Convert a PDF (supplied as a URL) to a single merged Markdown document
+    using the OpenAI Vision API.
+
+    Each page is rasterised to an image at the requested DPI, sent to the
+    model for Markdown extraction, and the results are stitched together
+    before being returned.
+
+    Temporary files created during processing are cleaned up automatically
+    in the background after the response is sent.
+    """
+    request_id = f"req_{int(time.time() * 1000)}"
+    logger.info(f"[{request_id}] POST /convert/markdown — {request.pdf_url}")
+
+    try:
+        pipeline = MarkdownConversionPipeline(request)
+        result = await pipeline.execute(request_id)
+        background_tasks.add_task(_cleanup_markdown_files, result.artifacts)
+
+        return MarkdownResponse(
+            markdown=result.markdown,
+            pages_processed=result.pages_processed,
+            model_used=result.model_used,
+        )
+
+    except Exception as exc:
+        logger.error(f"[{request_id}] Markdown conversion failed: {exc}")
+        raise HTTPException(
+            status_code=500, detail=f"Conversion failed: {exc}"
+        ) from exc
+
+
+@app.post(
+    "/convert/async",
+    response_model=AsyncJobResponse,
+    status_code=202,
+    tags=["Conversion"],
+    summary="Convert PDF to HTML (async, returns job_id)",
+    response_description="Job accepted — poll GET /jobs/{job_id} for status",
+)
+async def convert_pdf_to_html_async(
+    request: PDFRequest, background_tasks: BackgroundTasks
+):
+    """Submit a PDF conversion job. Returns 202 immediately with a job_id.
+
+    Poll GET /jobs/{job_id} to check status and retrieve the result.
+    """
+    job_id = job_store.create_job()
+    background_tasks.add_task(_run_conversion_background, job_id, request, job_store)
+    return AsyncJobResponse(job_id=job_id)
+
+
+@app.get(
+    "/jobs/{job_id}",
+    tags=["Conversion"],
+    summary="Poll async conversion job status",
+)
+async def get_job_status(job_id: str):
+    """Return the current status of an async conversion job.
+
+    Always returns pages_done and pages_total so callers can render a progress bar.
+    Returns 404 when the job_id is unknown.
+    """
+    job = job_store.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job {job_id!r} not found")
+
+    status = job["status"]
+
+    if status == "failed":
+        return {"status": "failed", "error": job["error"]}
+
+    base = {
+        "status": status,
+        "pages_done": job["pages_done"],
+        "pages_total": job["pages_total"],
+    }
+
+    if status == "done":
+        result = job["result"]
+        return {
+            **base,
+            "html": result["html"],
+            "sample_json": result["sample_json"],
+            "pages_processed": result["pages_processed"],
+        }
+
+    return base
 
 
 # ---------------------------------------------------------------------------
