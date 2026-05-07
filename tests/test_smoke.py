@@ -79,5 +79,18 @@ def test_merge_pages_single_page():
     assert result.count('<section class="page">') == 1
 
 
+def test_merge_pages_includes_tailwind_cdn():
+    """Merged HTML must include the Tailwind CDN script tag."""
+    result = merge_pages(['<section class="page"><p>Hello</p></section>'], "grid")
+    assert "cdn.tailwindcss.com" in result
+
+
+def test_merge_pages_tailwind_present_in_all_modes():
+    """Tailwind CDN is present regardless of css_mode."""
+    for mode in ("grid", "columns", "single"):
+        result = merge_pages(['<section class="page"><p>x</p></section>'], mode)
+        assert "cdn.tailwindcss.com" in result, f"Tailwind missing for mode={mode}"
+
+
 if __name__ == "__main__":
-    pytest.main([__file__]) 
+    pytest.main([__file__])
