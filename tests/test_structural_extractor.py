@@ -17,16 +17,37 @@ from pdf2html_api.services.structural_extractor import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _make_mock_rect(x0, y0, x1, y1):
+    """Return a mock fitz.Rect with x0/y0/x1/y1 attributes."""
+    rect = MagicMock()
+    rect.x0 = x0
+    rect.y0 = y0
+    rect.x1 = x1
+    rect.y1 = y1
+    return rect
+
+
 def _make_mock_page(
     drawings=None,
     images=None,
     text_dict=None,
+    image_rects=None,
 ):
-    """Return a mock fitz.Page with controllable outputs."""
+    """Return a mock fitz.Page with controllable outputs.
+
+    image_rects: dict mapping xref -> list[Rect], defaults to a single rect at (0,0,100,80)
+    """
     page = MagicMock()
     page.get_drawings.return_value = drawings or []
     page.get_images.return_value = images or []
     page.get_text.return_value = text_dict or {"blocks": []}
+
+    if image_rects is not None:
+        page.get_image_rects.side_effect = lambda xref: image_rects.get(xref, [])
+    else:
+        # Default: one rect per image at (0, 0, 100, 80)
+        page.get_image_rects.return_value = [_make_mock_rect(0, 0, 100, 80)]
+
     return page
 
 
@@ -139,7 +160,10 @@ class TestColorFormatting:
 class TestImageExtraction:
     def test_embedded_image_becomes_extracted_image(self):
         raw_bytes = b"\x89PNG\r\n\x1a\n"
-        page = _make_mock_page(images=[(1, 0, 100, 80, 8, "DeviceRGB", "", "", "png", "")])
+        page = _make_mock_page(
+            images=[(1, 0, 100, 80, 8, "DeviceRGB", "", "", "png", "")],
+            image_rects={1: [_make_mock_rect(10, 20, 110, 100)]},
+        )
         doc = _make_mock_doc([page], image_data={"image": raw_bytes, "ext": "png"})
 
         with patch("fitz.open", return_value=doc):
@@ -148,16 +172,23 @@ class TestImageExtraction:
         assert len(result[0].images) == 1
         img = result[0].images[0]
         assert img.id == "img_0"
+        assert img.bbox == (10, 20, 110, 100)
         assert img.data_url.startswith("data:image/png;base64,")
         expected_b64 = base64.b64encode(raw_bytes).decode()
         assert img.data_url == f"data:image/png;base64,{expected_b64}"
 
     def test_multiple_images_get_sequential_ids(self):
         raw = b"FAKE"
-        page = _make_mock_page(images=[
-            (1, 0, 100, 80, 8, "DeviceRGB", "", "", "png", ""),
-            (2, 0, 50, 50, 8, "DeviceRGB", "", "", "jpeg", ""),
-        ])
+        page = _make_mock_page(
+            images=[
+                (1, 0, 100, 80, 8, "DeviceRGB", "", "", "png", ""),
+                (2, 0, 50, 50, 8, "DeviceRGB", "", "", "jpeg", ""),
+            ],
+            image_rects={
+                1: [_make_mock_rect(0, 0, 100, 80)],
+                2: [_make_mock_rect(0, 100, 50, 150)],
+            },
+        )
         doc = _make_mock_doc([page], image_data={"image": raw, "ext": "png"})
 
         with patch("fitz.open", return_value=doc):
@@ -166,15 +197,75 @@ class TestImageExtraction:
         ids = [img.id for img in result[0].images]
         assert ids == ["img_0", "img_1"]
 
+    def test_images_ordered_by_visual_reading_order(self):
+        """img_0 must be the topmost image on the page (smallest y0), not the first xref."""
+        raw = b"FAKE"
+        # xref 1 appears second in the list but is lower on the page (y=200)
+        # xref 2 appears first in the list but is higher on the page (y=50)
+        page = _make_mock_page(
+            images=[
+                (1, 0, 100, 80, 8, "DeviceRGB", "", "", "png", ""),  # xref=1, lower on page
+                (2, 0, 50, 50, 8, "DeviceRGB", "", "", "png", ""),  # xref=2, higher on page
+            ],
+            image_rects={
+                1: [_make_mock_rect(10, 200, 110, 280)],  # y0=200 → appears second
+                2: [_make_mock_rect(10, 50, 60, 100)],    # y0=50 → appears first
+            },
+        )
+        doc = _make_mock_doc([page], image_data={"image": raw, "ext": "png"})
+
+        with patch("fitz.open", return_value=doc):
+            result = StructuralExtractor.extract_all(Path("fake.pdf"))
+
+        images = result[0].images
+        assert len(images) == 2
+        assert images[0].bbox == (10, 50, 60, 100)   # topmost image gets img_0
+        assert images[0].id == "img_0"
+        assert images[1].bbox == (10, 200, 110, 280)  # lower image gets img_1
+        assert images[1].id == "img_1"
+
+    def test_image_bbox_reflects_page_position_not_dimensions(self):
+        """bbox must come from get_image_rects, not image pixel dimensions."""
+        raw = b"FAKE"
+        page = _make_mock_page(
+            images=[(1, 0, 400, 300, 8, "DeviceRGB", "", "", "png", "")],  # 400x300 image
+            image_rects={1: [_make_mock_rect(50, 75, 250, 225)]},           # placed at (50,75)
+        )
+        doc = _make_mock_doc([page], image_data={"image": raw, "ext": "png"})
+
+        with patch("fitz.open", return_value=doc):
+            result = StructuralExtractor.extract_all(Path("fake.pdf"))
+
+        img = result[0].images[0]
+        assert img.bbox == (50, 75, 250, 225)   # page position, not (0, 0, 400, 300)
+        assert img.width == 400                  # pixel dimensions preserved
+        assert img.height == 300
+
+    def test_image_without_rects_is_skipped_gracefully(self):
+        """An image with no page rects (e.g. form XObject) should be skipped."""
+        raw = b"FAKE"
+        page = _make_mock_page(
+            images=[(1, 0, 100, 80, 8, "DeviceRGB", "", "", "png", "")],
+            image_rects={1: []},  # no rects — image not placed on page
+        )
+        doc = _make_mock_doc([page], image_data={"image": raw, "ext": "png"})
+
+        with patch("fitz.open", return_value=doc):
+            result = StructuralExtractor.extract_all(Path("fake.pdf"))
+
+        assert result[0].images == []
+
     def test_image_extraction_failure_skips_image_gracefully(self):
-        page = _make_mock_page(images=[(1, 0, 100, 80, 8, "DeviceRGB", "", "", "png", "")])
+        page = _make_mock_page(
+            images=[(1, 0, 100, 80, 8, "DeviceRGB", "", "", "png", "")],
+            image_rects={1: [_make_mock_rect(0, 0, 100, 80)]},
+        )
         doc = _make_mock_doc([page])
         doc.extract_image.side_effect = Exception("xref error")
 
         with patch("fitz.open", return_value=doc):
             result = StructuralExtractor.extract_all(Path("fake.pdf"))
 
-        # Should not raise; images list is empty (skipped)
         assert result[0].images == []
 
 

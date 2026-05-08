@@ -118,31 +118,48 @@ def _extract_text_colors(page: fitz.Page) -> list[str]:
 
 
 def _extract_images(page: fitz.Page, doc: fitz.Document, page_index: int) -> list[ExtractedImage]:
-    extracted: list[ExtractedImage] = []
+    # Collect (y0, x0, bbox, data_url, width, height) then sort by visual reading order.
+    candidates: list[tuple] = []
     try:
-        for img_index, img_info in enumerate(page.get_images(full=True)):
+        for img_info in page.get_images(full=True):
             xref = img_info[0]
+            width = img_info[2]
+            height = img_info[3]
             try:
+                rects = page.get_image_rects(xref)
+                if not rects:
+                    # Image is not placed on the page (e.g. embedded form XObject) — skip.
+                    continue
+                rect = rects[0]
+                if hasattr(rect, "x0"):
+                    bbox = (round(rect.x0), round(rect.y0), round(rect.x1), round(rect.y1))
+                else:
+                    x0, y0, x1, y1 = rect
+                    bbox = (round(x0), round(y0), round(x1), round(y1))
+
                 image_dict = doc.extract_image(xref)
                 raw_bytes = image_dict["image"]
                 ext = image_dict.get("ext", "png")
                 data_url = f"data:image/{ext};base64,{base64.b64encode(raw_bytes).decode()}"
-                extracted.append(
-                    ExtractedImage(
-                        id=f"img_{img_index}",
-                        bbox=(0, 0, img_info[2], img_info[3]),
-                        data_url=data_url,
-                        width=img_info[2],
-                        height=img_info[3],
-                    )
-                )
+                candidates.append((bbox[1], bbox[0], bbox, data_url, width, height))
             except Exception as exc:
-                logger.warning(
-                    "Skipping image %d on page %d: %s", img_index, page_index, exc
-                )
+                logger.warning("Skipping image xref=%d on page %d: %s", xref, page_index, exc)
     except Exception as exc:
         logger.warning("Failed to list images on page %d: %s", page_index, exc)
-    return extracted
+
+    # Sort top-to-bottom, left-to-right so img_0 is always the topmost image.
+    candidates.sort(key=lambda c: (c[0], c[1]))
+
+    return [
+        ExtractedImage(
+            id=f"img_{i}",
+            bbox=c[2],
+            data_url=c[3],
+            width=c[4],
+            height=c[5],
+        )
+        for i, c in enumerate(candidates)
+    ]
 
 
 class StructuralExtractor:
