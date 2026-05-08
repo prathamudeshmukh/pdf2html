@@ -5,7 +5,7 @@ import re
 import time
 import logging
 from pathlib import Path
-from typing import Literal, Union
+from typing import Literal, Optional, Union
 
 from openai import OpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -107,7 +107,12 @@ class HTMLGenerator:
         wait=wait_exponential(multiplier=1, min=4, max=10),
         reraise=True,
     )
-    def _call_openai_vision(self, image_path: Path, css_mode: Literal["grid", "columns", "single"]) -> str:
+    def _call_openai_vision(
+        self,
+        image_path: Path,
+        css_mode: Literal["grid", "columns", "single"],
+        structural_context: Union[dict, None] = None,
+    ) -> str:
         """
         Call OpenAI Vision API with retry logic.
         
@@ -127,9 +132,16 @@ class HTMLGenerator:
         # Encode image
         base64_image = self._encode_image(image_path)
         
-        # Prepare the prompt with CSS mode context
+        # Prepare the prompt with CSS mode context and optional structural metadata
         prompt_start = time.time()
         system_prompt = self.prompt_template
+        if structural_context:
+            import json as _json
+            system_prompt = (
+                system_prompt
+                + "\n\nSTRUCTURAL METADATA (extracted from PDF — use to apply accurate colors and place images):\n"
+                + _json.dumps(structural_context, ensure_ascii=False)
+            )
         user_prompt = f"Convert this image to HTML using {css_mode} layout. Preserve original structure and reading order."
         
         prompt_time = time.time() - prompt_start
@@ -186,7 +198,10 @@ class HTMLGenerator:
             raise
     
     def image_page_to_html(
-        self, image_path: Path, css_mode: Literal["grid", "columns", "single"]
+        self,
+        image_path: Path,
+        css_mode: Literal["grid", "columns", "single"],
+        structural_context: Union[dict, None] = None,
     ) -> str:
         """
         Convert a single page image to HTML.
@@ -210,7 +225,7 @@ class HTMLGenerator:
         
         # Call OpenAI Vision API
         api_start = time.time()
-        raw_response = self._call_openai_vision(image_path, css_mode)
+        raw_response = self._call_openai_vision(image_path, css_mode, structural_context)
         api_time = time.time() - api_start
         
         # Clean and validate the response

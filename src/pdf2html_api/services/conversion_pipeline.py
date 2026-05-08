@@ -18,6 +18,8 @@ from .css_mode_validator import CSSModeValidator
 from .html_generator_factory import HTMLGeneratorFactory
 from .sample_json_extractor import SampleJSONExtractor
 from .sample_json_to_html import apply_sample_json_to_html
+from .structural_extractor import StructuralExtractor
+from .image_injector import ImageInjector
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +75,13 @@ class ConversionPipeline:
         image_paths, temp_dir = render_pdf_to_images(pdf_path, self._settings.dpi)
         logger.info(f"[{request_id}] Rendered {len(image_paths)} page image(s)")
 
+        try:
+            page_metadata = StructuralExtractor.extract_all(pdf_path)
+            logger.info(f"[{request_id}] Extracted structural metadata for {len(page_metadata)} page(s)")
+        except Exception as exc:
+            logger.warning(f"[{request_id}] Structural extraction failed, continuing without metadata: {exc}")
+            page_metadata = []
+
         if progress_callback is not None:
             progress_callback.on_pages_total(len(image_paths))
 
@@ -84,7 +93,14 @@ class ConversionPipeline:
             request_id,
             self._settings.max_parallel_workers,
             on_page_done=progress_callback.on_page_done if progress_callback else None,
+            page_metadata=page_metadata,
         )
+
+        try:
+            page_html_list = ImageInjector.inject_all(page_html_list, page_metadata)
+            logger.info(f"[{request_id}] Image injection complete")
+        except Exception as exc:
+            logger.warning(f"[{request_id}] Image injection failed, continuing without injected images: {exc}")
 
         final_html = merge_pages(page_html_list, self._settings.css_mode)
 

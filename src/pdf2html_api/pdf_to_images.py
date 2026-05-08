@@ -18,7 +18,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-def render_pdf_to_images(pdf_path: Path, dpi: int = 200) -> tuple[List[Path], tempfile.TemporaryDirectory]:
+def render_pdf_to_images(pdf_path: Path, dpi: int = 300) -> tuple[List[Path], tempfile.TemporaryDirectory]:
     """
     Render each PDF page to a PNG image.
     
@@ -110,7 +110,7 @@ def render_pdf_to_images(pdf_path: Path, dpi: int = 200) -> tuple[List[Path], te
     return image_paths, temp_dir
 
 
-def _optimize_image_for_api(image_path: Path, max_size: int = 1024, quality: int = 85) -> Path:
+def _optimize_image_for_api(image_path: Path, max_size: int = 2048, quality: int = 85) -> Path:
     """
     Optimize image size for faster API processing.
     
