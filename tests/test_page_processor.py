@@ -96,7 +96,7 @@ class TestPageProcessor:
         assert len(result) == 4
 
     def test_page_order_preserved(self):
-        def side(path, css_mode):
+        def side(path, css_mode, structural_context=None):
             idx = int(path.replace("img", "").replace(".png", ""))
             return f'<section class="page">Page{idx}</section>'
         g = MagicMock()
@@ -111,7 +111,7 @@ class TestPageProcessor:
     def test_css_mode_forwarded_to_generator(self):
         g = self._gen('<section class="page">x</section>')
         self._run(PageProcessor().process_pages(g, ["img1.png"], "columns", "r", 1))
-        g.image_page_to_html.assert_called_once_with("img1.png", "columns")
+        g.image_page_to_html.assert_called_once_with("img1.png", "columns", structural_context=None)
 
     def test_exception_replaced_with_placeholder(self):
         g = MagicMock()
@@ -122,7 +122,7 @@ class TestPageProcessor:
         assert "Error processing page 1" in result[0]
 
     def test_partial_failure_does_not_drop_successful_pages(self):
-        def side(path, css_mode):
+        def side(path, css_mode, structural_context=None):
             if "img1" in path:
                 return '<section class="page">OK</section>'
             raise RuntimeError("page 2 failed")

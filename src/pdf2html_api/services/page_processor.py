@@ -6,7 +6,10 @@ import threading
 import time
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from typing import Callable, List, Optional
+from typing import TYPE_CHECKING, Callable, List, Optional
+
+if TYPE_CHECKING:
+    from pdf2html_api.services.structural_extractor import PageMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +37,7 @@ class PageProcessor:
         request_id: str,
         max_workers: int = 3,
         on_page_done: Optional[Callable[[int, int], None]] = None,
+        page_metadata: Optional[List] = None,
     ) -> List[str]:
         """
         Convert every page image to HTML, preserving order.
@@ -65,9 +69,13 @@ class PageProcessor:
                 n = done_count[0]
             on_page_done(n, total)
 
+        ctx_list = page_metadata if page_metadata else []
+
         if total == 1:
+            ctx = ctx_list[0].to_context_dict() if ctx_list else None
             html = self._convert_page(
-                html_generator, image_paths[0], 0, total, css_mode, request_id
+                html_generator, image_paths[0], 0, total, css_mode, request_id,
+                structural_context=ctx,
             )
             _report()
             return [html]
@@ -77,7 +85,8 @@ class PageProcessor:
             f"{total} pages, {max_workers} workers"
         )
         return await self._process_parallel(
-            html_generator, image_paths, css_mode, request_id, max_workers, _report
+            html_generator, image_paths, css_mode, request_id, max_workers, _report,
+            ctx_list=ctx_list,
         )
 
     # ------------------------------------------------------------------
@@ -92,10 +101,12 @@ class PageProcessor:
         request_id: str,
         max_workers: int,
         page_done_hook: Optional[Callable] = None,
+        ctx_list: Optional[List] = None,
     ) -> List[str]:
         """Submit all pages to a thread pool and gather results in order."""
         loop = asyncio.get_event_loop()
         total = len(image_paths)
+        ctx_list = ctx_list or []
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [
@@ -110,6 +121,7 @@ class PageProcessor:
                         css_mode,
                         request_id,
                         page_done_hook,
+                        ctx_list[index].to_context_dict() if index < len(ctx_list) else None,
                     ),
                 )
                 for index, path in enumerate(image_paths)
@@ -140,6 +152,7 @@ class PageProcessor:
         css_mode: str,
         request_id: str,
         page_done_hook: Optional[Callable] = None,
+        structural_context: Optional[dict] = None,
     ) -> str:
         """Convert a single page; return an error placeholder on failure."""
         page_num = page_index + 1
@@ -147,7 +160,9 @@ class PageProcessor:
         logger.info(f"[{request_id}] Processing page {page_num}/{total_pages}…")
 
         try:
-            html = html_generator.image_page_to_html(image_path, css_mode)
+            html = html_generator.image_page_to_html(
+                image_path, css_mode, structural_context=structural_context
+            )
             elapsed = time.time() - start
             logger.info(
                 f"[{request_id}] Page {page_num} done in {elapsed:.3f}s "
